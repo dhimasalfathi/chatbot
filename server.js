@@ -23,11 +23,15 @@ const crypto = require('crypto');
 // -----------------------------
 // Config
 // -----------------------------
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || (process.env.NODE_ENV === 'production' ? 8080 : 5000);
 const LM_BASE_URL = process.env.LM_BASE_URL || 'http://localhost:1234/v1';
 const LM_API_KEY  = process.env.LM_API_KEY  || 'lm-studio';
 const LM_MODEL    = process.env.LM_MODEL    || 'qwen2.5-7b-instruct-1m';
-// const LM_MODEL    = process.env.LM_MODEL    || 'qwen/qwen3-8b';
+const NODE_ENV    = process.env.NODE_ENV    || 'development';
+
+console.log(`🔧 Environment: ${NODE_ENV}`);
+console.log(`🌐 Port: ${PORT}`);
+console.log(`🤖 LM Studio: ${LM_BASE_URL}`);
 
 // -----------------------------
 // App bootstrap
@@ -299,8 +303,45 @@ Berikan hasil dalam format JSON yang valid:
     return {};
   } catch (error) {
     console.error('Error extracting info:', error);
-    return {};
+    
+    // Fallback extraction using simple pattern matching
+    return extractInfoFallback(messages);
   }
+}
+
+function extractInfoFallback(messages) {
+  const allText = messages.map(m => m.content).join(' ').toLowerCase();
+  const info = {};
+  
+  // Extract name (simple pattern)
+  const nameMatch = allText.match(/nama\s+(?:saya\s+)?(?:adalah\s+)?([a-zA-Z\s]+)/i);
+  if (nameMatch) {
+    info.full_name = nameMatch[1].trim();
+  }
+  
+  // Extract category
+  if (allText.includes('tabungan') || allText.includes('debit') || allText.includes('atm')) {
+    info.category = 'Tabungan';
+  } else if (allText.includes('kartu kredit') || allText.includes('kredit')) {
+    info.category = 'Kartu Kredit';
+  } else if (allText.includes('giro') || allText.includes('cek')) {
+    info.category = 'Giro';
+  }
+  
+  // Extract account number
+  const accountMatch = allText.match(/(?:rekening|nomor|account)[:\s]*(\d{10,16})/);
+  if (accountMatch) {
+    info.account_number = accountMatch[1];
+  }
+  
+  // Extract contact preference
+  if (allText.includes('telepon') || allText.includes('call')) {
+    info.preferred_contact = 'call';
+  } else if (allText.includes('chat') || allText.includes('pesan')) {
+    info.preferred_contact = 'chat';
+  }
+  
+  return info;
 }
 
 function determineChatAction(collected_info, messageCount) {
@@ -451,24 +492,62 @@ async function callLM(messages, useJsonMode = true) {
 
   console.log('Calling LM with payload:', JSON.stringify(payload, null, 2));
 
-  const res = await fetch(`${LM_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${LM_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  });
+  try {
+    const res = await fetch(`${LM_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${LM_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload),
+      timeout: 30000 // 30 second timeout
+    });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    console.error(`LM HTTP Error ${res.status}:`, text);
-    throw new Error(`LM HTTP ${res.status}: ${text}`);
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      console.error(`LM HTTP Error ${res.status}:`, text);
+      
+      // If LM Studio is not available, provide fallback response
+      if (res.status === 400 && text.includes('Model unloaded')) {
+        console.warn('LM Studio model not loaded, using fallback response');
+        return getFallbackResponse(messages);
+      }
+      
+      throw new Error(`LM HTTP ${res.status}: ${text}`);
+    }
+    
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content?.trim() ?? '';
+    console.log('LM Response:', content);
+    return content;
+  } catch (error) {
+    console.error('LM Studio connection failed:', error.message);
+    console.warn('Using fallback response due to LM Studio unavailability');
+    return getFallbackResponse(messages);
   }
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content?.trim() ?? '';
-  console.log('LM Response:', content);
-  return content;
+}
+
+function getFallbackResponse(messages) {
+  const lastUserMessage = messages.filter(m => m.role === 'user').pop()?.content?.toLowerCase() || '';
+  
+  // Simple fallback responses based on keywords
+  if (lastUserMessage.includes('halo') || lastUserMessage.includes('hai')) {
+    return 'Selamat datang di layanan customer service bank. Untuk membantu Anda lebih baik, mohon berikan nama lengkap dan kategori masalah yang dihadapi (Tabungan/Kartu Kredit/Giro/Lainnya).';
+  }
+  
+  if (lastUserMessage.includes('nama')) {
+    return 'Terima kasih atas informasinya. Sekarang mohon jelaskan kategori masalah yang Anda hadapi: Tabungan, Kartu Kredit, Giro, atau Lainnya?';
+  }
+  
+  if (lastUserMessage.includes('tabungan') || lastUserMessage.includes('debit')) {
+    return 'Terima kasih. Untuk masalah tabungan, mohon jelaskan detail masalah yang Anda hadapi dan berikan nomor rekening Anda.';
+  }
+  
+  if (lastUserMessage.includes('kartu kredit') || lastUserMessage.includes('kredit')) {
+    return 'Terima kasih. Untuk masalah kartu kredit, mohon jelaskan detail masalah yang Anda hadapi.';
+  }
+  
+  return 'Terima kasih atas informasinya. Mohon berikan detail lebih lanjut mengenai masalah yang Anda hadapi agar kami dapat membantu dengan lebih baik.';
 }
 
 async function extractJsonWithLM(text) {
@@ -688,12 +767,22 @@ app.get('/chatbot', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Chat-to-Form server running on http://0.0.0.0:${PORT}`);
-  console.log(`LM base URL: ${LM_BASE_URL} | Model: ${LM_MODEL}`);
-  console.log(`Legacy API Tester: http://localhost:${PORT}/`);
-  console.log(`New Chatbot Interface: http://localhost:${PORT}/chatbot`);
+  console.log(`🚀 Chat-to-Form server running on http://0.0.0.0:${PORT}`);
+  console.log(`🤖 LM base URL: ${LM_BASE_URL} | Model: ${LM_MODEL}`);
+  console.log(`📋 Legacy API Tester: http://localhost:${PORT}/`);
+  console.log(`💬 New Chatbot Interface: http://localhost:${PORT}/chatbot`);
   console.log(`\n🌐 Network Access:`);
   console.log(`   Server binding to all interfaces (0.0.0.0:${PORT})`);
-  console.log(`   Check Windows Firewall if devices can't connect`);
-  console.log(`   Use 'ipconfig' to find your IP address`);
+  
+  if (NODE_ENV === 'production') {
+    console.log(`🔴 Production mode - server will run in background`);
+    console.log(`📊 Use PM2 commands for management`);
+  } else {
+    console.log(`🟡 Development mode - server will stop when SSH disconnects`);
+    console.log(`💡 Use './start-server.sh production' for persistent running`);
+  }
+  
+  console.log(`\n📡 External access (if firewall configured):`);
+  console.log(`   http://YOUR_EXTERNAL_IP:${PORT}/chatbot`);
+  console.log(`   http://YOUR_EXTERNAL_IP:${PORT}/chat (API)`);
 });
