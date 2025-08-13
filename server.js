@@ -27,11 +27,13 @@ const PORT = process.env.PORT || (process.env.NODE_ENV === 'production' ? 8080 :
 const LM_BASE_URL = process.env.LM_BASE_URL || 'http://localhost:1234/v1';
 const LM_API_KEY  = process.env.LM_API_KEY  || 'lm-studio';
 const LM_MODEL    = process.env.LM_MODEL    || 'qwen2.5-7b-instruct-1m';
+const LM_TEMPERATURE = parseFloat(process.env.LM_TEMPERATURE) || 0.8;
 const NODE_ENV    = process.env.NODE_ENV    || 'development';
 
 console.log(`🔧 Environment: ${NODE_ENV}`);
 console.log(`🌐 Port: ${PORT}`);
 console.log(`🤖 LM Studio: ${LM_BASE_URL}`);
+console.log(`🌡️ Temperature: ${LM_TEMPERATURE}`);
 
 // -----------------------------
 // App bootstrap
@@ -485,7 +487,7 @@ async function callLM(messages, useJsonMode = true) {
   const payload = {
     model: LM_MODEL,
     messages,
-    temperature: 0.2
+    temperature: LM_TEMPERATURE
   };
   // LM Studio doesn't support json_object format, so we'll remove this
   // if (useJsonMode) payload.response_format = { type: 'json_object' };
