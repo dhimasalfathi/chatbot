@@ -21,21 +21,37 @@ const cors = require('cors');
 const crypto = require('crypto');
 const fs = require('fs');
 const { parse: csvParse } = require('csv-parse/sync');
+const { getLocalIP, getNetworkConfig } = require('./network-config');
+const { detectEnvironment, getLMStudioURL, getDeploymentInstructions } = require('./lm-config');
 
 // -----------------------------
 // Config
 // -----------------------------
 const PORT = process.env.PORT || (process.env.NODE_ENV === 'production' ? 8080 : 5000);
-const LM_BASE_URL = process.env.LM_BASE_URL || 'http://169.254.198.50:1234/v1';
+const NODE_ENV = process.env.NODE_ENV || 'development';
+
+// Smart LM Studio URL detection
+const LM_BASE_URL = "https://6a7d04fe49a2.ngrok-free.app/v1";
 const LM_API_KEY  = process.env.LM_API_KEY  || 'lm-studio';
 const LM_MODEL    = process.env.LM_MODEL    || 'qwen2.5-7b-instruct-1m';
 const LM_TEMPERATURE = parseFloat(process.env.LM_TEMPERATURE) || 0.8;
-const NODE_ENV    = process.env.NODE_ENV    || 'development';
 
-console.log(`🔧 Environment: ${NODE_ENV}`);
+// Environment detection
+const environment = detectEnvironment();
+const deploymentInfo = getDeploymentInstructions();
+
+console.log(`🔧 Environment: ${NODE_ENV} (${deploymentInfo.environment})`);
 console.log(`🌐 Port: ${PORT}`);
 console.log(`🤖 LM Studio: ${LM_BASE_URL}`);
 console.log(`🌡️ Temperature: ${LM_TEMPERATURE}`);
+
+// Show deployment instructions if needed
+if (environment.isGCP || environment.isProduction) {
+  console.log(`\n📋 DEPLOYMENT SETUP REQUIRED:`);
+  deploymentInfo.instructions.forEach((instruction, i) => {
+    console.log(`   ${instruction}`);
+  });
+}
 
 // -----------------------------
 // Load SLA knowledge base from CSV
@@ -351,18 +367,36 @@ function computeConfidence(extracted) {
 // -----------------------------
 // Chatbot Conversation System
 // -----------------------------
+// Helper function to get time-based greeting
+function getTimeBasedGreeting() {
+  const now = new Date();
+  const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}));
+  const hour = jakartaTime.getHours();
+  
+  if (hour >= 5 && hour < 12) {
+    return "Selamat pagi";
+  } else if (hour >= 12 && hour < 15) {
+    return "Selamat siang";
+  } else if (hour >= 15 && hour < 18) {
+    return "Selamat sore";
+  } else {
+    return "Selamat malam";
+  }
+}
+
 const CHAT_SYSTEM_PROMPT = `
 Kamu adalah asisten customer service bank di Indonesia yang ramah dan profesional. Tugasmu adalah membantu nasabah dengan keluhan dan pertanyaan mereka.
 
 INSTRUKSI PERCAKAPAN:
-- Selalu sapa dengan ramah di awal percakapan dan tidak usah mengucap assalamualaikum wr wb dan sebagainya.
-- Jangan mengucapkan "saya" atau "kamu", gunakan bahasa netral.
-- Tanya nama lengkap dulu jika belum ada
+- Gunakan sapaan yang sesuai dengan waktu (pagi/siang/sore/malam) tanpa menyebut assalamualaikum atau salam agama tertentu
+- Gunakan bahasa yang netral dan profesional
+- Jangan menggunakan kata "saya" atau "kamu", gunakan bahasa yang lebih formal
+- Tanya nama lengkap terlebih dahulu jika belum ada
 - Tanyakan kategori masalah (Tabungan/Kartu Kredit/Giro/Lainnya)
 - Minta detail keluhan secara spesifik
 - Jika masalah terkait tabungan/giro, tanyakan nomor rekening
 - Tanyakan preferensi kontak (telepon/chat)
-- Jika prefer telepon, tanyakan waktu standby
+- Jika memilih telepon, tanyakan waktu standby
 - Berikan empati dan gunakan bahasa yang sopan
 - Tanya satu hal per waktu agar tidak membingungkan
 
@@ -508,11 +542,13 @@ async function processChatMessage(sessionId, userMessage) {
   }));
 
   // Add context about current state
+  const greeting = getTimeBasedGreeting();
   const contextMessage = `
 Informasi yang sudah dikumpulkan: ${JSON.stringify(session.collected_info, null, 2)}
 Percakapan ke-${session.messages.length}.
+Waktu saat ini: ${greeting} (${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })})
 
-Berdasarkan konteks di atas, berikan respons yang sesuai.
+Berdasarkan konteks di atas, berikan respons yang sesuai. Gunakan sapaan waktu yang tepat jika ini adalah awal percakapan.
   `.trim();
 
   // Get SLA information based on conversation context
@@ -606,7 +642,8 @@ async function callLM(messages, useJsonMode = true) {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${LM_API_KEY}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true'  // Bypass ngrok warning page
       },
       body: JSON.stringify(payload),
       timeout: 30000 // 30 second timeout
@@ -638,10 +675,11 @@ async function callLM(messages, useJsonMode = true) {
 
 function getFallbackResponse(messages) {
   const lastUserMessage = messages.filter(m => m.role === 'user').pop()?.content?.toLowerCase() || '';
+  const greeting = getTimeBasedGreeting();
   
   // Simple fallback responses based on keywords
   if (lastUserMessage.includes('halo') || lastUserMessage.includes('hai')) {
-    return 'Selamat datang di layanan customer service bank. Untuk membantu Anda lebih baik, mohon berikan nama lengkap dan kategori masalah yang dihadapi (Tabungan/Kartu Kredit/Giro/Lainnya).';
+    return `${greeting}! Selamat datang di layanan customer service bank. Untuk membantu Anda lebih baik, mohon berikan nama lengkap dan kategori masalah yang dihadapi (Tabungan/Kartu Kredit/Giro/Lainnya).`;
   }
   
   if (lastUserMessage.includes('nama')) {
@@ -908,12 +946,17 @@ app.get('/chatbot', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
+  const networkConfig = getNetworkConfig();
+  const LOCAL_IP = getLocalIP();
+  
   console.log(`🚀 Chat-to-Form server running on http://0.0.0.0:${PORT}`);
   console.log(`🤖 LM base URL: ${LM_BASE_URL} | Model: ${LM_MODEL}`);
   console.log(`📋 Legacy API Tester: http://localhost:${PORT}/`);
   console.log(`💬 New Chatbot Interface: http://localhost:${PORT}/chatbot`);
   console.log(`\n🌐 Network Access:`);
   console.log(`   Server binding to all interfaces (0.0.0.0:${PORT})`);
+  console.log(`   Local IP detected: ${LOCAL_IP}`);
+  console.log(`   Environment: ${deploymentInfo.environment}`);
   
   if (NODE_ENV === 'production') {
     console.log(`🔴 Production mode - server will run in background`);
@@ -923,7 +966,28 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`💡 Use './start-server.sh production' for persistent running`);
   }
   
-  console.log(`\n📡 External access (if firewall configured):`);
-  console.log(`   http://YOUR_EXTERNAL_IP:${PORT}/chatbot`);
-  console.log(`   http://YOUR_EXTERNAL_IP:${PORT}/chat (API)`);
+  console.log(`\n📡 External Access URLs:`);
+  console.log(`   Chatbot: ${networkConfig.chatbotURL}`);
+  console.log(`   API: ${networkConfig.apiURL}`);
+  
+  if (environment.isLocal) {
+    console.log(`   LM Studio: ${networkConfig.lmStudioURL}`);
+    console.log(`\n🔧 LM Studio Setup Instructions:`);
+    console.log(`   1. Open LM Studio → Local Server`);
+    console.log(`   2. Set Host: 0.0.0.0 (not localhost!)`);
+    console.log(`   3. Set Port: 1234`);
+    console.log(`   4. Enable "Allow external requests"`);
+    console.log(`   5. Start the server`);
+  } else {
+    console.log(`\n🔧 GCP Deployment Configuration:`);
+    console.log(`   Current LM URL: ${LM_BASE_URL}`);
+    if (LM_BASE_URL.includes('YOUR_LAPTOP_IP')) {
+      console.log(`   ⚠️  Please configure LM_BASE_URL environment variable!`);
+      console.log(`   ⚠️  Or create ngrok-url.txt file with your ngrok URL`);
+    }
+  }
+  
+  console.log(`\n🔥 Firewall Setup (Run as Administrator):`);
+  console.log(`   netsh advfirewall firewall add rule name="LM Studio" dir=in action=allow protocol=TCP localport=1234`);
+  console.log(`   netsh advfirewall firewall add rule name="Chatbot" dir=in action=allow protocol=TCP localport=${PORT}`);
 });
