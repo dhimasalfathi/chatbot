@@ -12,7 +12,9 @@
   "env_production": {
     "NODE_ENV": "production",
     "PORT": 8080,
-    "LM_BASE_URL": "http://localhost:1234/v1"
+    "LM_BASE_URL": "https://6a7d04fe49a2.ngrok-free.app/v1",
+    "LM_MODEL": "qwen2.5-7b-instruct-1m",
+    "LM_TEMPERATURE": "0.8"
   },
   "log_file": "./logs/combined.log",
   "out_file": "./logs/out.log",

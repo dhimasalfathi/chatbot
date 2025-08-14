@@ -632,10 +632,13 @@ async function callLM(messages, useJsonMode = true) {
     messages,
     temperature: LM_TEMPERATURE
   };
-  // LM Studio doesn't support json_object format, so we'll remove this
-  // if (useJsonMode) payload.response_format = { type: 'json_object' };
+  
+  console.log(`🤖 Calling LM Studio at: ${LM_BASE_URL}`);
+  console.log('📤 Payload:', JSON.stringify({...payload, messages: `${payload.messages.length} messages`}));
 
-  console.log('Calling LM with payload:', JSON.stringify(payload, null, 2));
+  // Create AbortController for proper timeout handling
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second timeout
 
   try {
     const res = await fetch(`${LM_BASE_URL}/chat/completions`, {
@@ -643,32 +646,64 @@ async function callLM(messages, useJsonMode = true) {
       headers: {
         'Authorization': `Bearer ${LM_API_KEY}`,
         'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': 'true'  // Bypass ngrok warning page
+        'ngrok-skip-browser-warning': 'true',
+        'User-Agent': 'GCP-Chatbot/1.0',
+        'Accept': 'application/json',
+        'Cache-Control': 'no-cache'
       },
       body: JSON.stringify(payload),
-      timeout: 30000 // 30 second timeout
+      signal: controller.signal
     });
 
+    clearTimeout(timeoutId); // Clear timeout if request succeeds
+
+    console.log(`📡 LM Response Status: ${res.status}`);
+    
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      console.error(`LM HTTP Error ${res.status}:`, text);
+      console.error(`❌ LM HTTP Error ${res.status}:`, text.slice(0, 500));
       
-      // If LM Studio is not available, provide fallback response
+      // Specific error handling
       if (res.status === 400 && text.includes('Model unloaded')) {
-        console.warn('LM Studio model not loaded, using fallback response');
+        console.warn('⚠️ LM Studio model not loaded, using fallback response');
         return getFallbackResponse(messages);
       }
       
-      throw new Error(`LM HTTP ${res.status}: ${text}`);
+      if (res.status === 503) {
+        console.warn('⚠️ LM Studio service unavailable, using fallback response');
+        return getFallbackResponse(messages);
+      }
+      
+      throw new Error(`LM HTTP ${res.status}: ${text.slice(0, 200)}`);
     }
     
     const data = await res.json();
     const content = data?.choices?.[0]?.message?.content?.trim() ?? '';
-    console.log('LM Response:', content);
+    
+    if (!content) {
+      console.warn('⚠️ Empty response from LM Studio, using fallback');
+      return getFallbackResponse(messages);
+    }
+    
+    console.log('✅ LM Response received:', content.slice(0, 100) + (content.length > 100 ? '...' : ''));
     return content;
+    
   } catch (error) {
-    console.error('LM Studio connection failed:', error.message);
-    console.warn('Using fallback response due to LM Studio unavailability');
+    clearTimeout(timeoutId);
+    
+    if (error.name === 'AbortError') {
+      console.error('❌ LM Studio request timeout (25s)');
+    } else {
+      console.error('❌ LM Studio connection failed:', error.message);
+    }
+    
+    console.error('🔧 Error details:', {
+      name: error.name,
+      message: error.message,
+      url: LM_BASE_URL
+    });
+    
+    console.warn('⚠️ Using fallback response due to LM Studio unavailability');
     return getFallbackResponse(messages);
   }
 }
@@ -927,6 +962,101 @@ app.get('/sla', (req, res) => {
   } catch (e) {
     console.error('SLA search error:', e);
     res.status(500).json({ error: 'internal_error', detail: e.message });
+  }
+});
+
+// Test LM Studio connectivity endpoint
+app.get('/test-lm', async (req, res) => {
+  try {
+    console.log('🔍 Testing LM Studio connectivity from server...');
+    
+    // Test models endpoint first
+    const modelsRes = await fetch(`${LM_BASE_URL}/models`, {
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+        'User-Agent': 'Chatbot-Server/1.0',
+        'Accept': 'application/json'
+      },
+      timeout: 10000
+    });
+    
+    const modelsStatus = modelsRes.status;
+    let modelsData = null;
+    
+    if (modelsRes.ok) {
+      modelsData = await modelsRes.json();
+    }
+    
+    // Test chat endpoint
+    const chatRes = await fetch(`${LM_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${LM_API_KEY}`,
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+        'User-Agent': 'Chatbot-Server/1.0',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        model: LM_MODEL,
+        messages: [{ role: 'user', content: 'Test connection' }],
+        temperature: 0.7,
+        max_tokens: 20
+      }),
+      timeout: 15000
+    });
+    
+    const chatStatus = chatRes.status;
+    let chatData = null;
+    let chatError = null;
+    
+    if (chatRes.ok) {
+      chatData = await chatRes.json();
+    } else {
+      chatError = await chatRes.text();
+    }
+    
+    res.json({
+      timestamp: new Date().toISOString(),
+      lm_base_url: LM_BASE_URL,
+      lm_model: LM_MODEL,
+      tests: {
+        models: {
+          status: modelsStatus,
+          success: modelsStatus === 200,
+          data: modelsData?.data?.length ? `${modelsData.data.length} models found` : 'No models',
+          available_models: modelsData?.data?.map(m => m.id) || []
+        },
+        chat: {
+          status: chatStatus,
+          success: chatStatus === 200,
+          response: chatData?.choices?.[0]?.message?.content || null,
+          error: chatError?.slice(0, 200) || null
+        }
+      },
+      overall_status: (modelsStatus === 200 && chatStatus === 200) ? 'HEALTHY' : 'UNHEALTHY',
+      recommendations: [
+        modelsStatus !== 200 ? 'Check LM Studio server status' : null,
+        chatStatus !== 200 ? 'Check model loading and API configuration' : null,
+        'Verify ngrok tunnel is active',
+        'Check firewall settings'
+      ].filter(Boolean)
+    });
+    
+  } catch (error) {
+    console.error('LM connectivity test error:', error);
+    res.status(500).json({
+      timestamp: new Date().toISOString(),
+      lm_base_url: LM_BASE_URL,
+      error: error.message,
+      overall_status: 'ERROR',
+      recommendations: [
+        'Check if LM Studio is running',
+        'Verify ngrok tunnel is active',
+        'Check network connectivity',
+        'Review server logs for details'
+      ]
+    });
   }
 });
 
