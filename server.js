@@ -19,12 +19,14 @@
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
+const fs = require('fs');
+const { parse: csvParse } = require('csv-parse/sync');
 
 // -----------------------------
 // Config
 // -----------------------------
 const PORT = process.env.PORT || (process.env.NODE_ENV === 'production' ? 8080 : 5000);
-const LM_BASE_URL = process.env.LM_BASE_URL || 'http://localhost:1234/v1';
+const LM_BASE_URL = process.env.LM_BASE_URL || 'http://169.254.198.50:1234/v1';
 const LM_API_KEY  = process.env.LM_API_KEY  || 'lm-studio';
 const LM_MODEL    = process.env.LM_MODEL    || 'qwen2.5-7b-instruct-1m';
 const LM_TEMPERATURE = parseFloat(process.env.LM_TEMPERATURE) || 0.8;
@@ -34,6 +36,98 @@ console.log(`🔧 Environment: ${NODE_ENV}`);
 console.log(`🌐 Port: ${PORT}`);
 console.log(`🤖 LM Studio: ${LM_BASE_URL}`);
 console.log(`🌡️ Temperature: ${LM_TEMPERATURE}`);
+
+// -----------------------------
+// Load SLA knowledge base from CSV
+// -----------------------------
+let SLA_DATA = [];
+
+function loadSLAData() {
+  try {
+    const csvPath = require('path').join(__dirname, 'data_sheet_sla_extracted.csv');
+    if (!fs.existsSync(csvPath)) {
+      console.warn(`ℹ️ SLA CSV not found at ${csvPath} - skipping`);
+      return;
+    }
+    
+    const raw = fs.readFileSync(csvPath, 'utf8');
+    const records = csvParse(raw, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true
+    });
+    
+    // Normalize and clean data
+    SLA_DATA = records.map(r => ({
+      no: r.No || r.NO || r.no || null,
+      service: (r.Service || '').trim(),
+      channel: (r.Channel || '').trim(),
+      category: (r.Category || '').trim(),
+      sla: (r.SLA || '').toString().trim(),
+      uic: (r.UIC || '').replace(/\s+$/,'').trim(),
+      keterangan: (r.Keterangan || '').replace(/\s+/g,' ').trim()
+    }));
+    
+    console.log(`📚 Loaded ${SLA_DATA.length} SLA entries from CSV`);
+    console.log(`📊 Sample entry:`, SLA_DATA[0] ? {
+      service: SLA_DATA[0].service,
+      channel: SLA_DATA[0].channel,
+      sla: SLA_DATA[0].sla + ' hari'
+    } : 'No data');
+  } catch (e) {
+    console.error('Failed to load SLA CSV:', e.message);
+  }
+}
+
+// Load SLA data on startup
+loadSLAData();
+
+// SLA search functions
+function scoreSLARecord(rec, queryTokens, preferredCategory) {
+  const haystack = `${rec.service} ${rec.channel} ${rec.category} ${rec.keterangan}`.toLowerCase();
+  let score = 0;
+  
+  for (const token of queryTokens) {
+    if (!token || token.length < 2) continue;
+    if (haystack.includes(token)) score += 2;
+  }
+  
+  // Boost score if category matches
+  if (preferredCategory && rec.category.toLowerCase().includes(preferredCategory.toLowerCase())) {
+    score += 3;
+  }
+  
+  return score;
+}
+
+function searchSLA(query, preferredCategory = null, limit = 3) {
+  if (!SLA_DATA || SLA_DATA.length === 0) return [];
+  
+  const q = String(query || '').toLowerCase();
+  const tokens = q.split(/[^a-z0-9]+/).filter(w => w && w.length > 2);
+  
+  const scored = SLA_DATA
+    .map(rec => ({ 
+      rec, 
+      score: scoreSLARecord(rec, tokens, preferredCategory) 
+    }))
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(x => x.rec);
+    
+  return scored;
+}
+
+function formatSLAHints(records) {
+  if (!records || records.length === 0) return null;
+  
+  const lines = records.map(r => 
+    `- ${r.service} (${r.channel}) | ${r.category} | SLA: ${r.sla} hari | ${r.uic} | ${r.keterangan}`
+  );
+  
+  return `Informasi SLA terkait:\n${lines.join('\n')}\n\nCatatan: SLA adalah target waktu penyelesaian complaint dalam hari kerja.`;
+}
 
 // -----------------------------
 // App bootstrap
@@ -272,6 +366,12 @@ INSTRUKSI PERCAKAPAN:
 - Berikan empati dan gunakan bahasa yang sopan
 - Tanya satu hal per waktu agar tidak membingungkan
 
+INFORMASI SLA:
+- Jika ada informasi SLA yang relevan, sampaikan dengan jelas berapa lama waktu penyelesaian
+- SLA adalah target waktu penyelesaian dalam hari kerja
+- Berikan informasi UIC (unit yang menangani) jika tersedia
+- Jelaskan proses penanganan secara singkat
+
 Berikan respons yang natural dan ramah sesuai konteks percakapan.
 `.trim();
 
@@ -415,9 +515,16 @@ Percakapan ke-${session.messages.length}.
 Berdasarkan konteks di atas, berikan respons yang sesuai.
   `.trim();
 
+  // Get SLA information based on conversation context
+  const lastUserMessage = userMessage || '';
+  const preferredCategory = session.collected_info?.category || null;
+  const slaMatches = searchSLA(lastUserMessage, preferredCategory, 2);
+  const slaHintText = formatSLAHints(slaMatches);
+
   const messages = [
     { role: 'system', content: CHAT_SYSTEM_PROMPT },
     { role: 'system', content: contextMessage },
+    ...(slaHintText ? [{ role: 'system', content: slaHintText }] : []),
     ...conversationHistory.slice(-6) // Keep last 6 messages for context
   ];
 
@@ -750,6 +857,38 @@ app.get('/faq', (req, res) => {
     res.json({ answer: hit.answer, matched_keywords: hit.matched });
   } else {
     res.json({ answer: null, matched_keywords: [], hint: 'Tidak ada jawaban di FAQ. Silakan hubungi agent.' });
+  }
+});
+
+// SLA search endpoint
+app.get('/sla', (req, res) => {
+  try {
+    const q = String(req.query?.q || '').trim();
+    const category = String(req.query?.category || '').trim() || null;
+    const limit = parseInt(req.query?.limit || '5', 10);
+    
+    if (!q) {
+      return res.status(400).json({ error: 'Parameter q (query) diperlukan' });
+    }
+    
+    const results = searchSLA(q, category, Math.min(limit, 10));
+    
+    res.json({ 
+      count: results.length, 
+      query: q,
+      category: category,
+      results: results.map(r => ({
+        service: r.service,
+        channel: r.channel,
+        category: r.category,
+        sla_days: r.sla,
+        uic: r.uic,
+        description: r.keterangan
+      }))
+    });
+  } catch (e) {
+    console.error('SLA search error:', e);
+    res.status(500).json({ error: 'internal_error', detail: e.message });
   }
 });
 

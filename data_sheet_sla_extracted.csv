@@ -1,0 +1,22 @@
+"No","Service","Channel","Category","SLA","UIC","Keterangan"
+"5","Complaint","ATM","Pembayaran Kartu Kredit BNI","1","BCC - Customer Care","Transaksi gagal namun rekening terdebet, transaksi suksesnamun rekening tidak terdebet, refund karena double bayar,Salah IDPEL/Operator dan Salah input Nominal Pembelian."
+"8","Complaint","ATM","Transfer Antar Rekening BNI","1","BCC - Customer Care","Gagal transaksi rekening terdebet namun tidak tetkredit kerekening tujuan, rekening terdebet lebih dari satu kali (transaksinormal), transfer terkredit lebih dari satu kali (transaksi normal),salah transfer (bank/rekening tujuan) dan salah nominal"
+"12","Complaint","ATM","Pembayaran Kartu Kredit Bank Lain","5","DGOUSER 1(UIC6)","Transaksi gagal namun rekening terdebet transaksi suksesnamun rekening tidal terdebet, refund karena double bayar,Salal IDPEL/Operator dan Salah input Nominal Pembelian."
+"15","Complaint","ATM","Pembayaran PLN via ATM Bank Lain","5","DGOUSER 1(UIC6)","Transaksi gagal namun rekening terdebet, transaksi suksesnamun rekening tidak terdebet, refund karena double bayar,Salah IDPEL/Operator dan Salah input Nominal Pembelian."
+"16","Complaint","ATM","Pembayaran Samsat","5","DGOUSER 1(UIC6)","Transaksi gagal namun rekening terdebet, transaksi suksesnamun rekening tidak terdebet, refund karena double bayar,Salah IDPEL/Operator dan Salah input Nominal Pembelian."
+"19","Complaint","ATM","Pembayaran Telom/Telkomsel/Indosat/Provider Lainnya","5","DGOUSER 1(UIC6)","Transaksi gagal namun rekening terdebet, transaksi suksesnamun rekening tidak terdebet, refund karena double bayar,Salah IDPEL/Operator dan Salah input Nominal Pembelian."
+"22","Complaint","ATM","Top Up Dana","5","Divisi TBS","Nasabah melakukan top up Dana, transaksi gagal rekeningterdebet"
+"25","Complaint","ATM","Top Up Gopay","5","DGO USER 1(UIC6)","Gagal pengisian top up Gopay, rekening terdebet."
+"28","Complaint","ATM","Top Up OVO","5","Divisi TBS","Nasabah melakukan top up OVO, transaksigagal rekening terdebet"
+"31","Complaint","ATM","Top Up Pulsa","5","DGO USER 1(UIC6)","Gagal pengisian pulsa prabayar, rekening terdebet"
+"34","Complaint","ATM","Top Up Pulsa via ATM Bank Lain","5","DGO USER 1(UIC6)","Gagal pengisian pulsa prabayar, rekening terdebet"
+"35","Complaint","ATM","Top Up Shopee Pay","5","Divisi TBS","Nasabah melakukan top up Shopee pay, transaksi gagalrekening terdebet"
+"38","Complaint","ATM","Top Up LinkAja","5","DGO USER 1(UIC11)","Gagal pengisian top up LinkAja, rekening terdebet."
+"41","Complaint","ATM","Transfer ATM Alto (Dana Tdk Masuk ke Rek Tujuan)","5","DGO USER 1(UIC1)","Transaksi sukses, Rekening terdebet tapi dana tidak masuk kerekening tujuan."
+"44","Complaint","ATM","Transfer ATM Bersama (Dana Tdk Masuk ke Rek Tujuan)","5","DGO USER 1(UIC1)","Transaksi sukses, Rekening terdebet tapi dana tidak masuk kerekening tujuan."
+"47","Complaint","ATM","Transfer ATM Link (Dana Tdk Masuk ke Rek Tujuan)","5","DGO USER 1(UIC1)","Transaksi sukses, Rekening terdebet tapi dana tidak masuk kerekening tujuan."
+"50","Complaint","ATM","Transfer ATM Prima (Dana Tdk Masuk ke Rek Tujuan)","5","DGO USER 1(UIC1)","Transaksi sukses, Rekening terdebet tapi dana tidak masuk kerekening tujuan."
+"53","Complaint","ATM","Top Up e-money","6","DGO USER 1(UIC1)","Gagal to up ke e-money, rekening terdebet."
+"60","Complaint","ATM","Tarik Tunai Di Mesin ATM BNI","7","DGO USER 1(UIC3)","Transaksi Tarik Tunai Rekening terdebet namun uang tidakkeluar dan transaksi rekening tidak terdebet namun uang keluar"
+"61","Complaint","ATM","Transfer ATM Alto Bilateral (Refund,salah/batal transfer,rekterdebet > 1x)","7","BCC - Customer Care /DGO USER 1 (UIC1)","Nasabah melakukan permohonan Refund, pembatalan Transfer,komplain karena rekening terdebet> 1x"
+"64","Complaint","ATM","Transfer ATM Bersama Bilateral (Refund,salah/batal transfer,rek terdebet > 1x)","7","BCC - Customer Care /DGO USER 1 (UIC1)","Nasabah melakukan permohonan Refund, pembatalan Transfer,komplain karena rekening terdebet> 1x"
