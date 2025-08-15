@@ -1,3 +1,21 @@
+// server.js
+// ------------------------------------------------------------
+// Chat-to-Form (MVP) with LM Studio (OpenAI-compatible API)
+// + Auto Clarification + Simple FAQ
+// ------------------------------------------------------------
+// Requirements:
+//   npm i express cors
+// Node.js 18+
+//
+// Env vars (opsional, punya default):
+//   LM_BASE_URL=http://localhost:1234/v1
+//   LM_API_KEY=lm-studio
+//   LM_MODEL=qwen2.5-7b-instruct-q4_k_m
+//
+// Run:
+//   node server.js
+// ------------------------------------------------------------
+
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
@@ -141,23 +159,115 @@ app.use(express.json({ limit: '2mb' }));
 const STATES = new Map();
 const CHAT_SESSIONS = new Map();
 
+// -----------------------------
+// Validation & confidence
+// -----------------------------
+const EXTRACTION_SYSTEM = `
+You are a bank customer-care assistant for Indonesia. Extract a structured JSON from the user's complaint.
+
+Hard rules:
+- Output VALID JSON only (no prose).
+- Unknown fields = null.
+- category ∈ {Tabungan, Giro, Kartu Kredit, Lainnya}.
+- Use bahasa Indonesia for subcategory & description.
+- preferred_contact ∈ {call, chat, null}.
+- standby_call_window format: HH:mm-HH:mm (Asia/Jakarta).
+
+Classification rules (very important):
+- Jika menyebut: kartu debit / debit / ATM / rekening tabungan / tarik-setor tunai → category = Tabungan.
+- Jika menyebut: kartu kredit / CC / tagihan/limit/cicilan/chargeback/refund merchant → category = Kartu Kredit.
+- Jika menyebut: giro / bilyet giro (BG) / cek / inkaso / kliring → category = Giro.
+- Jika tidak yakin dengan kategori → category = null (jangan tebak).
+
+Subcategory hints:
+- Tabungan: “Kartu debit tertelan”, “Tarik tunai gagal”, “Saldo tidak sesuai”, “Kartu debit hilang”, “PIN terblokir”.
+- Kartu Kredit: “Transaksi tidak dikenali”, “Tagihan tidak sesuai”, “Kartu kredit hilang”, “Kena biaya tahunan”, “Limit tidak cukup”.
+- Giro: “BG tolak”, “Setoran cek pending”, “Inkaso terlambat”.
+
+Priority rules:
+- High jika ada kata kunci: “hilang”, “dicuri”, “fraud”, “transaksi tidak dikenal/tidak dikenali”, “akses tidak sah/ilegal”.
+- Selain itu default Medium (kecuali jelas Low).
+
+Time window:
+- Contoh masukan “13-15” → “13:00-15:00”; “13.30-15.45” → “13:30-15:45”.
+`.trim();
+
+const EXTRACTION_USER_TMPL = (text) => `
+Schema:
+{
+  "full_name": "string|null",
+  "account_number": "string|null",
+  "category": "Tabungan|Giro|Kartu Kredit|Lainnya|null",
+  "subcategory": "string|null",
+  "description": "string",
+  "priority": "Low|Medium|High",
+  "preferred_contact": "call|chat|null",
+  "standby_call_window": "string|null",
+  "attachments": []
+}
+
+Examples:
+Input:
+"Halo, kartu debit saya tertelan di ATM BNI Semarang semalam. Rekening 123456789012. Saya standby telepon 13-15."
+Output:
+{
+  "full_name": null,
+  "account_number": "123456789012",
+  "category": "Tabungan",
+  "subcategory": "Kartu debit tertelan",
+  "description": "Kartu debit tertelan di ATM BNI Semarang semalam.",
+  "priority": "Medium",
+  "preferred_contact": "call",
+  "standby_call_window": "13:00-15:00",
+  "attachments": []
+}
+
+Input:
+"Saya keberatan tagihan kartu kredit bulan ini, ada transaksi tidak saya kenal."
+Output:
+{
+  "full_name": null,
+  "account_number": null,
+  "category": "Kartu Kredit",
+  "subcategory": "Transaksi tidak dikenali",
+  "description": "Keberatan tagihan kartu kredit, ada transaksi tidak dikenali.",
+  "priority": "High",
+  "preferred_contact": null,
+  "standby_call_window": null,
+  "attachments": []
+}
+
+Input:
+"BG saya ditolak, tolong cek statusnya."
+Output:
+{
+  "full_name": null,
+  "account_number": null,
+  "category": "Giro",
+  "subcategory": "BG tolak",
+  "description": "Bilyet giro ditolak dan perlu pengecekan status.",
+  "priority": "Medium",
+  "preferred_contact": null,
+  "standby_call_window": null,
+  "attachments": []
+}
+
+User complaint (free text):
+"""${text}"""
+
+Output only the JSON object, nothing else.
+`.trim();
 
 // -----------------------------
 // Validation & confidence
 // -----------------------------
 function validatePayload(d) {
-  const okCat = [null, 'Top Up Gopay', 'Transfer Antar Bank', 'Pembayaran Tagihan', 'Biometric/Login Error', 'Saldo/Mutasi', 'Tabungan', 'Kartu Kredit', 'Giro', 'Lainnya'];
+  const okCat = [null, 'Tabungan', 'Giro', 'Kartu Kredit', 'Lainnya'];
   if (!okCat.includes(d.category)) {
-    return [false, 'Kategori tidak valid. Pilihan: Top Up Gopay/Transfer Antar Bank/Pembayaran Tagihan/Biometric Login Error/Saldo Mutasi/Tabungan/Kartu Kredit/Giro/Lainnya.'];
+    return [false, 'Kategori tidak valid. Pilihan: Tabungan/Giro/Kartu Kredit/Lainnya.'];
   }
-  
-  const okChannel = [null, 'Mobile Banking', 'Internet Banking', 'ATM', 'Kantor Cabang', 'Call Center', 'SMS Banking'];
-  if (!okChannel.includes(d.channel)) {
-    return [false, 'Channel tidak valid. Pilihan: Mobile Banking/Internet Banking/ATM/Kantor Cabang/Call Center/SMS Banking.'];
-  }
-  
-  if (d.account_number && !/^(\d{3}-\d{6}-\d{5}|\d{10,16})$/.test(String(d.account_number))) {
-    return [false, 'Format nomor rekening tidak valid (contoh: 002-000123-77099 atau 10-16 digit).'];
+  if (d.account_number && !/^\d{10,16}$/.test(String(d.account_number))) {
+    return [false, 'Format nomor rekening tidak valid (10–16 digit).'];
   }
   if (!d.description || String(d.description).trim() === '') {
     return [false, 'Deskripsi keluhan wajib diisi.'];
@@ -173,83 +283,83 @@ function validatePayload(d) {
 }
 
 function computeConfidence(extracted) {
-  const requiredFields = ['full_name', 'account_number', 'channel', 'category', 'description'];
-  const filled = requiredFields.filter(field => {
-    const value = extracted[field];
-    return value !== null && value !== '' && value !== undefined;
-  }).length;
-  
-  // Base confidence based on required fields completion
-  let base = (filled / requiredFields.length) * 0.9;
-  
-  // Additional boost for having all required fields
-  if (filled === requiredFields.length) base += 0.1;
-  
+  const filled = Object.values(extracted).filter(v => v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)).length;
+  let base = 0.45 + 0.06 * filled;
+  if (extracted.category && extracted.description) base += 0.05;
   return Math.max(0, Math.min(1, base));
 }
 
 // -----------------------------
 // Chatbot Conversation System
 // -----------------------------
+// Helper function to get time-based greeting
+function getTimeBasedGreeting() {
+  const now = new Date();
+  const jakartaTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Jakarta"}));
+  const hour = jakartaTime.getHours();
+  
+  if (hour >= 5 && hour < 12) {
+    return "Selamat pagi";
+  } else if (hour >= 12 && hour < 15) {
+    return "Selamat siang";
+  } else if (hour >= 15 && hour < 18) {
+    return "Selamat sore";
+  } else {
+    return "Selamat malam";
+  }
+}
+
+const CHAT_SYSTEM_PROMPT = `
+Kamu adalah asisten customer service bank di Indonesia yang ramah dan profesional. Tugasmu adalah membantu nasabah dengan keluhan dan pertanyaan mereka.
+
+INSTRUKSI PERCAKAPAN:
+- Gunakan sapaan yang sesuai dengan waktu (pagi/siang/sore/malam) tanpa menyebut assalamualaikum atau salam agama tertentu
+- Gunakan bahasa yang netral dan profesional
+- Jangan menggunakan kata "saya" atau "kamu", gunakan bahasa yang lebih formal
+- Tanya nama lengkap terlebih dahulu jika belum ada
+- Tanyakan kategori masalah (Tabungan/Kartu Kredit/Giro/Lainnya)
+- Minta detail keluhan secara spesifik
+- Jika masalah terkait tabungan/giro, tanyakan nomor rekening
+- Tanyakan preferensi kontak (telepon/chat)
+- Jika memilih telepon, tanyakan waktu standby
+- Berikan empati dan gunakan bahasa yang sopan
+- Tanya satu hal per waktu agar tidak membingungkan
+
+INFORMASI SLA:
+- Jika ada informasi SLA yang relevan, sampaikan dengan jelas berapa lama waktu penyelesaian
+- SLA adalah target waktu penyelesaian dalam hari kerja
+- Berikan informasi UIC (unit yang menangani) jika tersedia
+- Jelaskan proses penanganan secara singkat
+
+Berikan respons yang natural dan ramah sesuai konteks percakapan.
+`.trim();
 
 async function extractInfoFromConversation(messages) {
-  // Skip extraction if conversation is too short or only contains greetings
-  if (messages.length < 4) return {};
-  
-  // Check if conversation contains substantive information (not just greetings)
-  const userMessages = messages.filter(m => m.role === 'user').map(m => m.content.toLowerCase());
-  const hasSubstantiveInfo = userMessages.some(msg => 
-    msg.length > 30 || // Longer messages likely contain info
-    /\d{3}-\d{6}-\d{5}|\d{10,16}/.test(msg) || // Account numbers
-    /(nama\s+saya|rekening\s+saya|masalah|complaint|keluhan|transfer|top up|gopay|banking|mobile|internet|atm|cabang|call center|sms)/i.test(msg) // Banking terms
-  );
-  
-  if (!hasSubstantiveInfo) return {};
-  
   const extractionPrompt = `
-Analisis percakapan customer service berikut dan ekstrak HANYA informasi yang JELAS dan EKSPLISIT disebutkan:
+Analisis percakapan berikut dan ekstrak informasi nasabah:
 
 ${messages.map(m => `${m.role}: ${m.content}`).join('\n')}
 
-ATURAN PENTING:
-- HANYA ekstrak informasi yang BENAR-BENAR disebutkan user
-- JANGAN menebak atau mengasumsikan informasi
-- Jika user hanya menyebut kategori tanpa deskripsi detail, biarkan description = null
-- Jika informasi tidak jelas atau tidak disebutkan, gunakan null
-
 Berikan hasil dalam format JSON yang valid:
 {
-  "full_name": "nama lengkap yang disebutkan user atau null",
-  "account_number": "nomor rekening yang disebutkan user atau null", 
-  "channel": "channel yang disebutkan user atau null",
-  "category": "kategori yang disebutkan user atau null",
-  "description": "deskripsi masalah yang dijelaskan user atau null",
-  "preferred_contact": "preferensi kontak yang disebutkan atau null",
-  "standby_call_window": "waktu standby yang disebutkan atau null"
+  "full_name": "nama lengkap atau null",
+  "category": "Tabungan|Kartu Kredit|Giro|Lainnya|null",
+  "description": "ringkasan masalah atau null",
+  "account_number": "nomor rekening atau null",
+  "preferred_contact": "call|chat|null",
+  "standby_call_window": "waktu standby atau null"
 }
 `;
 
   try {
     const response = await callLM([
-      { role: 'system', content: 'Kamu adalah AI yang mengekstrak informasi dari percakapan customer service. HANYA ekstrak informasi yang JELAS disebutkan user. JANGAN menebak atau membuat asumsi. Berikan hasil dalam format JSON yang valid.' },
+      { role: 'system', content: 'Kamu adalah AI yang mengekstrak informasi dari percakapan customer service. Berikan hasil dalam format JSON yang valid.' },
       { role: 'user', content: extractionPrompt }
     ], false);
     
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      const extracted = JSON.parse(jsonMatch[0]);
-      
-      // Additional validation - remove any assumed descriptions
-      if (extracted.description && (
-        extracted.description.includes('mungkin') ||
-        extracted.description.includes('tidak jelas') ||
-        extracted.description.includes('harus lebih rinci') ||
-        extracted.description.length < 10
-      )) {
-        extracted.description = null;
-      }
-      
-      return extracted;
+      return JSON.parse(jsonMatch[0]);
     }
     return {};
   } catch (error) {
@@ -261,136 +371,59 @@ Berikan hasil dalam format JSON yang valid:
 }
 
 function extractInfoFallback(messages) {
-  const userMessages = messages.filter(m => m.role === 'user');
+  const allText = messages.map(m => m.content).join(' ').toLowerCase();
   const info = {};
   
-  // Extract name only from explicit mentions
-  for (const msg of userMessages) {
-    const nameMatch = msg.content.match(/nama\s+(?:saya\s+)?(?:adalah\s+)?([a-zA-Z\s]+)/i);
-    if (nameMatch && nameMatch[1].trim().length > 1) {
-      info.full_name = nameMatch[1].trim();
-      break;
-    }
+  // Extract name (simple pattern)
+  const nameMatch = allText.match(/nama\s+(?:saya\s+)?(?:adalah\s+)?([a-zA-Z\s]+)/i);
+  if (nameMatch) {
+    info.full_name = nameMatch[1].trim();
   }
   
-  // Extract account number only from explicit mentions
-  for (const msg of userMessages) {
-    const accountMatch = msg.content.match(/(?:rekening|nomor)[:\s]*(\d{3}-\d{6}-\d{5}|\d{10,16})/i);
-    if (accountMatch) {
-      info.account_number = accountMatch[1];
-      break;
-    }
+  // Extract category
+  if (allText.includes('tabungan') || allText.includes('debit') || allText.includes('atm')) {
+    info.category = 'Tabungan';
+  } else if (allText.includes('kartu kredit') || allText.includes('kredit')) {
+    info.category = 'Kartu Kredit';
+  } else if (allText.includes('giro') || allText.includes('cek')) {
+    info.category = 'Giro';
   }
   
-  // Extract channel only from explicit mentions
-  for (const msg of userMessages) {
-    const text = msg.content.toLowerCase();
-    if (text.includes('mobile banking') || text.includes('m-banking')) {
-      info.channel = 'Mobile Banking';
-      break;
-    } else if (text.includes('internet banking') || text.includes('i-banking')) {
-      info.channel = 'Internet Banking';
-      break;
-    } else if (text.includes('atm')) {
-      info.channel = 'ATM';
-      break;
-    } else if (text.includes('cabang') || text.includes('kantor')) {
-      info.channel = 'Kantor Cabang';
-      break;
-    } else if (text.includes('call center') || text.includes('telepon')) {
-      info.channel = 'Call Center';
-      break;
-    } else if (text.includes('sms')) {
-      info.channel = 'SMS Banking';
-      break;
-    }
+  // Extract account number
+  const accountMatch = allText.match(/(?:rekening|nomor|account)[:\s]*(\d{10,16})/);
+  if (accountMatch) {
+    info.account_number = accountMatch[1];
   }
   
-  // Extract category only from explicit mentions
-  for (const msg of userMessages) {
-    const text = msg.content.toLowerCase();
-    if (text === 'top up gopay' || text.includes('top up gopay')) {
-      info.category = 'Top Up Gopay';
-      break;
-    } else if (text === 'transfer antar bank' || text.includes('transfer antar bank')) {
-      info.category = 'Transfer Antar Bank';
-      break;
-    } else if (text === 'pembayaran tagihan' || text.includes('pembayaran tagihan')) {
-      info.category = 'Pembayaran Tagihan';
-      break;
-    } else if (text.includes('biometric') || text.includes('login error')) {
-      info.category = 'Biometric/Login Error';
-      break;
-    } else if (text === 'saldo/mutasi' || text.includes('saldo/mutasi')) {
-      info.category = 'Saldo/Mutasi';
-      break;
-    } else if (text === 'tabungan' && text.length < 20) {
-      info.category = 'Tabungan';
-      break;
-    } else if (text === 'kartu kredit' && text.length < 20) {
-      info.category = 'Kartu Kredit';
-      break;
-    } else if (text === 'giro' && text.length < 20) {
-      info.category = 'Giro';
-      break;
-    } else if (text === 'lainnya' && text.length < 20) {
-      info.category = 'Lainnya';
-      break;
-    }
+  // Extract contact preference
+  if (allText.includes('telepon') || allText.includes('call')) {
+    info.preferred_contact = 'call';
+  } else if (allText.includes('chat') || allText.includes('pesan')) {
+    info.preferred_contact = 'chat';
   }
   
   return info;
 }
 
 function determineChatAction(collected_info, messageCount) {
-  if (messageCount <= 2) return 'greeting';
-  if (!collected_info.full_name) return 'asking_name';
-  if (!collected_info.account_number) return 'asking_account';
-  if (!collected_info.channel) return 'asking_channel';
-  if (!collected_info.category) return 'asking_category';
-  if (!collected_info.description) return 'asking_description';
-  
-  // Only go to confirmation if we have ALL required fields
-  const requiredFields = ['full_name', 'account_number', 'channel', 'category', 'description'];
-  const hasAllRequired = requiredFields.every(field => {
-    const value = collected_info[field];
-    return value !== null && value !== '' && value !== undefined;
-  });
-  
-  if (hasAllRequired) {
-    return 'ready_for_confirmation';
-  }
-  
-  return 'asking_description'; // Default fallback
+  if (messageCount <= 1) return 'greeting';
+  if (!collected_info.full_name) return 'asking';
+  if (!collected_info.category) return 'asking';
+  if (!collected_info.description) return 'collecting';
+  if (collected_info.category === 'Tabungan' && !collected_info.account_number) return 'collecting';
+  if (!collected_info.preferred_contact) return 'collecting';
+  if (collected_info.preferred_contact === 'call' && !collected_info.standby_call_window) return 'collecting';
+  return 'completed';
 }
 
 function generateSuggestions(action, collected_info) {
-  switch (action) {
-    case 'asking_channel':
-      return ['Mobile Banking', 'Internet Banking', 'ATM', 'Kantor Cabang', 'Call Center', 'SMS Banking'];
-    case 'asking_category':
-      return ['Top Up Gopay', 'Transfer Antar Bank', 'Pembayaran Tagihan', 'Biometric/Login Error', 'Saldo/Mutasi', 'Tabungan', 'Kartu Kredit', 'Giro', 'Lainnya'];
-    case 'ready_for_confirmation':
-      return ['Ya, data sudah benar', 'Ada yang perlu diperbaiki'];
-    case 'asking_correction':
-      return ['Nama salah', 'No rekening salah', 'Channel salah', 'Kategori salah', 'Deskripsi salah'];
-    default:
-      return [];
+  if (!collected_info.category) {
+    return ['Tabungan', 'Kartu Kredit', 'Giro', 'Lainnya'];
   }
-}
-
-function generateConfirmationSummary(collected_info) {
-  return `
-📋 RINGKASAN KELUHAN ANDA
-
-👤 Nama: ${collected_info.full_name || 'Belum diisi'}
-💳 No. Rekening: ${collected_info.account_number || 'Belum diisi'}
-📱 Channel: ${collected_info.channel || 'Belum diisi'}
-📂 Kategori: ${collected_info.category || 'Belum diisi'}
-📝 Deskripsi: ${collected_info.description || 'Belum diisi'}
-
-Apakah data di atas sudah benar? Silakan konfirmasi atau beri tahu jika ada yang perlu diperbaiki.
-  `.trim();
+  if (!collected_info.preferred_contact) {
+    return ['Telepon', 'Chat'];
+  }
+  return [];
 }
 
 function createChatSession() {
@@ -400,17 +433,16 @@ function createChatSession() {
     messages: [],
     collected_info: {
       full_name: null,
-      account_number: null,
-      channel: null,
       category: null,
+      subcategory: null,
       description: null,
-      preferred_contact: 'chat',
+      account_number: null,
+      preferred_contact: null,
       standby_call_window: null,
       priority: 'Medium'
     },
     current_step: 'greeting',
-    is_complete: false,
-    needs_confirmation: false
+    is_complete: false
   };
 }
 
@@ -428,29 +460,6 @@ async function processChatMessage(sessionId, userMessage) {
     timestamp: new Date()
   });
 
-  // Handle first message (greeting)
-  if (session.messages.length === 1) {
-    const greeting = getTimeBasedGreeting();
-    const welcomeMessage = `${greeting} Terima kasih sudah menghubungi kami. Saya akan dengan senang hati membantu Anda hari ini. Bisa saya tahu nama lengkap Anda terlebih dahulu untuk penanganan lebih baik?`;
-    
-    session.messages.push({
-      role: 'assistant',
-      content: welcomeMessage,
-      timestamp: new Date()
-    });
-    
-    return {
-      session_id: sessionId,
-      message: welcomeMessage,
-      action: 'greeting',
-      next_question: null,
-      suggestions: [],
-      collected_info: session.collected_info,
-      is_complete: false,
-      confidence: computeConfidence(session.collected_info)
-    };
-  }
-
   // Build conversation context
   const conversationHistory = session.messages.map(msg => ({
     role: msg.role === 'user' ? 'user' : 'assistant',
@@ -462,9 +471,9 @@ async function processChatMessage(sessionId, userMessage) {
   const contextMessage = `
 Informasi yang sudah dikumpulkan: ${JSON.stringify(session.collected_info, null, 2)}
 Percakapan ke-${session.messages.length}.
-Langkah saat ini: ${session.current_step}
+Waktu saat ini: ${greeting} (${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })})
 
-Berdasarkan konteks di atas, berikan respons yang sesuai untuk melanjutkan pengumpulan informasi keluhan.
+Berdasarkan konteks di atas, berikan respons yang sesuai. Gunakan sapaan waktu yang tepat jika ini adalah awal percakapan.
   `.trim();
 
   // Get SLA information based on conversation context
@@ -492,19 +501,12 @@ Berdasarkan konteks di atas, berikan respons yang sesuai untuk melanjutkan pengu
       timestamp: new Date()
     });
 
-    // Extract information from the entire conversation (only if not greeting)
-    let extractedInfo = {};
-    if (session.messages.length > 2) {
-      extractedInfo = await extractInfoFromConversation(session.messages);
-      console.log('Extracted info:', extractedInfo);
-      
-      // Update collected info only with non-null values
-      Object.keys(extractedInfo).forEach(key => {
-        if (extractedInfo[key] !== null && extractedInfo[key] !== '') {
-          session.collected_info[key] = extractedInfo[key];
-        }
-      });
-    }
+    // Extract information from the entire conversation
+    const extractedInfo = await extractInfoFromConversation(session.messages);
+    console.log('Extracted info:', extractedInfo);
+    
+    // Update collected info
+    session.collected_info = { ...session.collected_info, ...extractedInfo };
     
     // Determine current action
     const action = determineChatAction(session.collected_info, session.messages.length);
@@ -514,73 +516,8 @@ Berdasarkan konteks di atas, berikan respons yang sesuai untuk melanjutkan pengu
     const suggestions = generateSuggestions(action, session.collected_info);
     
     // Check if conversation is complete
-    const requiredFields = ['full_name', 'account_number', 'channel', 'category', 'description'];
+    const requiredFields = ['full_name', 'category', 'description'];
     const hasRequired = requiredFields.every(field => session.collected_info[field]);
-    
-    // Handle confirmation step
-    if (action === 'ready_for_confirmation' && !session.needs_confirmation) {
-      session.needs_confirmation = true;
-      const confirmationMessage = generateConfirmationSummary(session.collected_info);
-      
-      // Override the LLM response with confirmation summary
-      session.messages[session.messages.length - 1].content = confirmationMessage;
-      
-      return {
-        session_id: sessionId,
-        message: confirmationMessage,
-        action: action,
-        next_question: null,
-        suggestions: generateSuggestions(action, session.collected_info),
-        collected_info: session.collected_info,
-        is_complete: false,
-        confidence: computeConfidence(session.collected_info),
-        needs_confirmation: true
-      };
-    }
-    
-    // Handle user confirmation response
-    if (session.needs_confirmation) {
-      if (userMessage.toLowerCase().includes('ya') || userMessage.toLowerCase().includes('benar') || userMessage.toLowerCase().includes('setuju')) {
-        session.is_complete = true;
-        session.needs_confirmation = false;
-        
-        const finalMessage = "✅ Terima kasih! Keluhan Anda telah berhasil dicatat. Tim kami akan segera menindaklanjuti keluhan Anda sesuai dengan SLA yang berlaku. Anda akan dihubungi melalui channel yang tersedia.";
-        
-        session.messages[session.messages.length - 1].content = finalMessage;
-        
-        return {
-          session_id: sessionId,
-          message: finalMessage,
-          action: 'completed',
-          next_question: null,
-          suggestions: [],
-          collected_info: session.collected_info,
-          is_complete: true,
-          confidence: 1.0,
-          needs_confirmation: false
-        };
-      } else if (userMessage.toLowerCase().includes('perbaiki') || userMessage.toLowerCase().includes('salah') || userMessage.toLowerCase().includes('tidak benar')) {
-        // Reset confirmation and ask what needs to be corrected
-        session.needs_confirmation = false;
-        
-        const correctionMessage = "Baik, ada yang perlu diperbaiki. Bisa Anda beritahu bagian mana yang perlu dikoreksi? Saya akan membantu memperbaiki data Anda.";
-        
-        session.messages[session.messages.length - 1].content = correctionMessage;
-        
-        return {
-          session_id: sessionId,
-          message: correctionMessage,
-          action: 'asking_correction',
-          next_question: null,
-          suggestions: ['Nama salah', 'No rekening salah', 'Channel salah', 'Kategori salah', 'Deskripsi salah'],
-          collected_info: session.collected_info,
-          is_complete: false,
-          confidence: computeConfidence(session.collected_info),
-          needs_confirmation: false
-        };
-      }
-    }
-    
     session.is_complete = hasRequired && action === 'completed';
 
     return {
@@ -822,10 +759,11 @@ app.post('/extract', async (req, res) => {
     // 4) Build summary
     const summary = {
       nama: extracted.full_name ?? null,
-      no_rekening: extracted.account_number ?? null,
-      channel: extracted.channel ?? null,
       kategori: extracted.category ?? null,
-      deskripsi: extracted.description ?? null
+      subkategori: extracted.subcategory ?? null,
+      ringkasan: extracted.description ?? null,
+      kontak: extracted.preferred_contact ?? null,
+      waktu_standby: extracted.standby_call_window ?? null
     };
 
     res.json({
@@ -862,10 +800,11 @@ app.post('/clarify', async (req, res) => {
     // Bangun summary
     const summary = {
       nama: merged.full_name ?? null,
-      no_rekening: merged.account_number ?? null,
-      channel: merged.channel ?? null,
       kategori: merged.category ?? null,
-      deskripsi: merged.description ?? null
+      subkategori: merged.subcategory ?? null,
+      ringkasan: merged.description ?? null,
+      kontak: merged.preferred_contact ?? null,
+      waktu_standby: merged.standby_call_window ?? null
     };
 
     STATES.delete(state_id); // cleanup

@@ -498,35 +498,33 @@
         panel.className = 'info-panel';
         
         const title = document.createElement('h4');
-        title.textContent = 'Informasi Terkumpul';
+        title.textContent = 'Form Complain';
         panel.appendChild(title);
         
         const fields = [
           { key: 'full_name', label: 'Nama' },
-          { key: 'category', label: 'Kategori' },
-          { key: 'subcategory', label: 'Sub-kategori' },
-          { key: 'account_number', label: 'No. Rekening' },
-          { key: 'preferred_contact', label: 'Kontak' },
-          { key: 'standby_call_window', label: 'Waktu Standby' }
+          { key: 'account_number', label: 'No Rekening' },
+          { key: 'channel', label: 'Channel' },
+          { key: 'category', label: 'Category' },
+          { key: 'description', label: 'Deskripsi' }
         ];
         
         fields.forEach(field => {
-          if (collectedInfo[field.key]) {
-            const item = document.createElement('div');
-            item.className = 'info-item';
-            item.innerHTML = `
-              <span class="label">${field.label}:</span>
-              <span class="value">${collectedInfo[field.key]}</span>
-            `;
-            panel.appendChild(item);
-          }
+          const item = document.createElement('div');
+          item.className = 'info-item';
+          const value = collectedInfo[field.key] || 'null';
+          item.innerHTML = `
+            <span class="label">${field.label}</span>
+            <span class="value">${value}</span>
+          `;
+          panel.appendChild(item);
         });
         
         if (confidence !== undefined) {
           const confidenceItem = document.createElement('div');
           confidenceItem.className = 'info-item';
           confidenceItem.innerHTML = `
-            <span class="label">Kelengkapan:</span>
+            <span class="label">Kelengkapan</span>
             <span class="value">${Math.round(confidence * 100)}%</span>
           `;
           panel.appendChild(confidenceItem);
@@ -543,10 +541,13 @@
         if (data.action) {
           const statusMap = {
             'greeting': 'Menyapa',
-            'asking': 'Menanyakan info',
-            'collecting': 'Mengumpulkan data',
-            'confirming': 'Konfirmasi',
-            'helping': 'Memberikan bantuan',
+            'asking_name': 'Menanyakan nama',
+            'asking_account': 'Menanyakan rekening',
+            'asking_channel': 'Menanyakan channel',
+            'asking_category': 'Menanyakan kategori',
+            'asking_description': 'Menanyakan deskripsi',
+            'ready_for_confirmation': 'Siap konfirmasi',
+            'asking_correction': 'Menanyakan koreksi',
             'completed': 'Selesai',
             'error': 'Error'
           };
