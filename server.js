@@ -193,71 +193,101 @@ function computeConfidence(extracted) {
 // -----------------------------
 
 async function extractInfoFromConversation(messages) {
-  // Skip extraction if conversation is too short or only contains greetings
-  if (messages.length < 4) return {};
+  // This function is now only used for extracting description from conversation
+  // Skip extraction if conversation is too short
+  if (messages.length < 6) return {};
   
-  // Check if conversation contains substantive information (not just greetings)
-  const userMessages = messages.filter(m => m.role === 'user').map(m => m.content.toLowerCase());
-  const hasSubstantiveInfo = userMessages.some(msg => 
-    msg.length > 30 || // Longer messages likely contain info
-    /\d{3}-\d{6}-\d{5}|\d{10,16}/.test(msg) || // Account numbers
-    /(nama\s+saya|rekening\s+saya|masalah|complaint|keluhan|transfer|top up|gopay|banking|mobile|internet|atm|cabang|call center|sms)/i.test(msg) // Banking terms
-  );
+  // Only extract description from user messages about their problem
+  const userMessages = messages.filter(m => m.role === 'user');
+  const lastFewMessages = userMessages.slice(-3); // Get last 3 user messages
   
-  if (!hasSubstantiveInfo) return {};
-  
-  const extractionPrompt = `
-Analisis percakapan customer service berikut dan ekstrak HANYA informasi yang JELAS dan EKSPLISIT disebutkan:
-
-${messages.map(m => `${m.role}: ${m.content}`).join('\n')}
-
-ATURAN PENTING:
-- HANYA ekstrak informasi yang BENAR-BENAR disebutkan user
-- JANGAN menebak atau mengasumsikan informasi
-- Jika user hanya menyebut kategori tanpa deskripsi detail, biarkan description = null
-- Jika informasi tidak jelas atau tidak disebutkan, gunakan null
-
-Berikan hasil dalam format JSON yang valid:
-{
-  "full_name": "nama lengkap yang disebutkan user atau null",
-  "account_number": "nomor rekening yang disebutkan user atau null", 
-  "channel": "channel yang disebutkan user atau null",
-  "category": "kategori yang disebutkan user atau null",
-  "description": "deskripsi masalah yang dijelaskan user atau null",
-  "preferred_contact": "preferensi kontak yang disebutkan atau null",
-  "standby_call_window": "waktu standby yang disebutkan atau null"
-}
-`;
-
-  try {
-    const response = await callLM([
-      { role: 'system', content: 'Kamu adalah AI yang mengekstrak informasi dari percakapan customer service. HANYA ekstrak informasi yang JELAS disebutkan user. JANGAN menebak atau membuat asumsi. Berikan hasil dalam format JSON yang valid.' },
-      { role: 'user', content: extractionPrompt }
-    ], false);
-    
-    const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const extracted = JSON.parse(jsonMatch[0]);
+  // Look for substantial description in recent messages
+  for (const msg of lastFewMessages.reverse()) {
+    if (msg.content.length > 20 && 
+        !msg.content.match(/^(mobile banking|internet banking|atm|kantor cabang|call center|sms banking)$/i) &&
+        !msg.content.match(/^(top up gopay|transfer antar bank|pembayaran tagihan|biometric\/login error|saldo\/mutasi|tabungan|kartu kredit|giro|lainnya)$/i) &&
+        !msg.content.match(/^\d{3}-\d{6}-\d{5}$|\d{10,16}$/)) {
       
-      // Additional validation - remove any assumed descriptions
-      if (extracted.description && (
-        extracted.description.includes('mungkin') ||
-        extracted.description.includes('tidak jelas') ||
-        extracted.description.includes('harus lebih rinci') ||
-        extracted.description.length < 10
-      )) {
-        extracted.description = null;
-      }
-      
-      return extracted;
+      // This looks like a description, return it
+      return { description: msg.content.trim() };
     }
-    return {};
-  } catch (error) {
-    console.error('Error extracting info:', error);
-    
-    // Fallback extraction using simple pattern matching
-    return extractInfoFallback(messages);
   }
+  
+  return {};
+}
+
+function extractInfoSimple(userMessage, currentAction) {
+  const info = {};
+  const text = userMessage.toLowerCase().trim();
+  
+  // Extract based on current step
+  switch (currentAction) {
+    case 'asking_name':
+      // Extract name - assume the entire message is the name if it doesn't contain numbers or special banking terms
+      if (!text.match(/\d{3}-\d{6}-\d{5}|\d{10,16}/) && 
+          !/(mobile|internet|banking|atm|cabang|call center|sms)/i.test(text) &&
+          text.length > 2 && text.length < 50) {
+        info.full_name = userMessage.trim();
+      }
+      break;
+      
+    case 'asking_account':
+      // Extract account number
+      const accountMatch = text.match(/(\d{3}-\d{6}-\d{5}|\d{10,16})/);
+      if (accountMatch) {
+        info.account_number = accountMatch[1];
+      }
+      break;
+      
+    case 'asking_channel':
+      // Extract channel
+      if (text.includes('mobile banking') || text.includes('m-banking') || text === 'mobile banking') {
+        info.channel = 'Mobile Banking';
+      } else if (text.includes('internet banking') || text.includes('i-banking') || text === 'internet banking') {
+        info.channel = 'Internet Banking';
+      } else if (text.includes('atm') || text === 'atm') {
+        info.channel = 'ATM';
+      } else if (text.includes('cabang') || text.includes('kantor') || text === 'kantor cabang') {
+        info.channel = 'Kantor Cabang';
+      } else if (text.includes('call center') || text.includes('telepon') || text === 'call center') {
+        info.channel = 'Call Center';
+      } else if (text.includes('sms') || text === 'sms banking') {
+        info.channel = 'SMS Banking';
+      }
+      break;
+      
+    case 'asking_category':
+      // Extract category - exact match prioritized
+      if (text === 'top up gopay' || text.includes('top up gopay')) {
+        info.category = 'Top Up Gopay';
+      } else if (text === 'transfer antar bank' || text.includes('transfer antar bank')) {
+        info.category = 'Transfer Antar Bank';
+      } else if (text === 'pembayaran tagihan' || text.includes('pembayaran tagihan')) {
+        info.category = 'Pembayaran Tagihan';
+      } else if (text.includes('biometric') || text.includes('login error')) {
+        info.category = 'Biometric/Login Error';
+      } else if (text === 'saldo/mutasi' || text.includes('saldo') || text.includes('mutasi')) {
+        info.category = 'Saldo/Mutasi';
+      } else if (text === 'tabungan' && text.length < 20) {
+        info.category = 'Tabungan';
+      } else if (text === 'kartu kredit' && text.length < 20) {
+        info.category = 'Kartu Kredit';
+      } else if (text === 'giro' && text.length < 20) {
+        info.category = 'Giro';
+      } else if (text === 'lainnya' && text.length < 20) {
+        info.category = 'Lainnya';
+      }
+      break;
+      
+    case 'asking_description':
+      // For description, we'll let the LLM handle it
+      if (text.length > 10) {
+        info.description = userMessage.trim();
+      }
+      break;
+  }
+  
+  return info;
 }
 
 function extractInfoFallback(messages) {
@@ -393,6 +423,51 @@ Apakah data di atas sudah benar? Silakan konfirmasi atau beri tahu jika ada yang
   `.trim();
 }
 
+async function generateDescriptionSummary(messages, collected_info) {
+  const conversationText = messages
+    .filter(m => m.role === 'user')
+    .map(m => m.content)
+    .join(' ');
+  
+  const summaryPrompt = `
+Berdasarkan percakapan customer service berikut, buatlah ringkasan singkat dan profesional tentang keluhan nasabah:
+
+Kategori: ${collected_info.category}
+Channel: ${collected_info.channel}
+Percakapan: ${conversationText}
+
+Buatlah ringkasan dalam 1-2 kalimat yang menjelaskan masalah utama nasabah secara jelas dan profesional. 
+Format: "Nasabah mengalami [masalah] saat [aktivitas] melalui [channel]."
+
+Contoh: "Nasabah mengalami masalah pembayaran tagihan yang sudah terdebit namun transaksi gagal melalui Mobile Banking."
+`;
+
+  try {
+    const response = await callLM([
+      { role: 'system', content: 'Kamu adalah AI yang membuat ringkasan keluhan nasabah bank. Buatlah ringkasan yang singkat, jelas, dan profesional.' },
+      { role: 'user', content: summaryPrompt }
+    ], false);
+    
+    // Clean up the response
+    let summary = response.trim();
+    
+    // Remove quotes if present
+    summary = summary.replace(/^["']|["']$/g, '');
+    
+    // Ensure it starts with "Nasabah"
+    if (!summary.toLowerCase().startsWith('nasabah')) {
+      summary = `Nasabah mengalami ${summary.toLowerCase()}`;
+    }
+    
+    return summary;
+  } catch (error) {
+    console.error('Error generating description summary:', error);
+    
+    // Fallback: create simple summary
+    return `Nasabah mengalami masalah terkait ${collected_info.category} melalui ${collected_info.channel}.`;
+  }
+}
+
 function createChatSession() {
   return {
     id: crypto.randomUUID(),
@@ -404,6 +479,7 @@ function createChatSession() {
       channel: null,
       category: null,
       description: null,
+      ai_generated_description: null, // Temporary field for AI summary
       preferred_contact: 'chat',
       standby_call_window: null,
       priority: 'Medium'
@@ -412,6 +488,29 @@ function createChatSession() {
     is_complete: false,
     needs_confirmation: false
   };
+}
+
+// Template responses for each step
+function getTemplateResponse(action, collected_info, userMessage) {
+  switch (action) {
+    case 'asking_name':
+      return "Terima kasih sudah memberikan informasinya! Sekarang, bisa saya tahu nama lengkap Anda terlebih dahulu untuk penanganan lebih baik?";
+    
+    case 'asking_account':
+      return `Terima kasih atas informasinya, ${collected_info.full_name}! Sekarang, bisa saya tanyakan nomor rekening yang Anda gunakan untuk menghadapi masalah ini? Pastikan nomor rekening diinput dalam format yang benar yaitu 002-000123-77099 atau minimal 10-16 digit angka.`;
+    
+    case 'asking_channel':
+      return `Terima kasih sudah memberikan nomor rekeningnya, ${collected_info.full_name}. Selanjutnya, bisa Anda beri tahu saya channel atau platform yang Anda gunakan saat mengalami masalah ini?`;
+    
+    case 'asking_category':
+      return `Terima kasih sudah memberikan informasinya, ${collected_info.full_name}. Sekarang, untuk membantu kita mengatasi masalah Anda dengan cepat dan tepat, bisa Anda beri tahu saya jenis keluhan yang Anda alami?`;
+    
+    case 'asking_description':
+      return `Terima kasih sudah memberikan informasinya, ${collected_info.full_name}. Kategori keluhan "${collected_info.category}" telah dipilih. Sekarang, silakan beri saya deskripsi detail masalah yang Anda alami. Jelaskan secara lengkap apa yang terjadi, kapan masalah terjadi, dan langkah apa yang sudah Anda coba.`;
+    
+    default:
+      return "Terima kasih atas informasinya. Silakan lanjutkan dengan memberikan detail yang diminta.";
+  }
 }
 
 async function processChatMessage(sessionId, userMessage) {
@@ -451,39 +550,44 @@ async function processChatMessage(sessionId, userMessage) {
     };
   }
 
-  // Build conversation context
-  const conversationHistory = session.messages.map(msg => ({
-    role: msg.role === 'user' ? 'user' : 'assistant',
-    content: msg.content
-  }));
-
-  // Add context about current state
-  const greeting = getTimeBasedGreeting();
-  const contextMessage = `
-Informasi yang sudah dikumpulkan: ${JSON.stringify(session.collected_info, null, 2)}
-Percakapan ke-${session.messages.length}.
-Langkah saat ini: ${session.current_step}
-
-Berdasarkan konteks di atas, berikan respons yang sesuai untuk melanjutkan pengumpulan informasi keluhan.
-  `.trim();
-
-  // Get SLA information based on conversation context
-  const lastUserMessage = userMessage || '';
-  const preferredCategory = session.collected_info?.category || null;
-  const slaMatches = searchSLA(lastUserMessage, preferredCategory, 2);
-  const slaHintText = formatSLAHints(slaMatches);
-
-  const messages = [
-    { role: 'system', content: CHAT_SYSTEM_PROMPT },
-    { role: 'system', content: contextMessage },
-    ...(slaHintText ? [{ role: 'system', content: slaHintText }] : []),
-    ...conversationHistory.slice(-6) // Keep last 6 messages for context
-  ];
-
   try {
-    // Get natural response from LLM
-    const response = await callLM(messages, false);
-    console.log('LLM Natural Response:', response);
+    // Extract information from user message using simple pattern matching
+    let extractedInfo = {};
+    
+    // Only use LM extraction for description step
+    const currentAction = determineChatAction(session.collected_info, session.messages.length);
+    
+    if (currentAction === 'asking_description' && session.messages.length > 2) {
+      // Use LM Studio only for extracting description from conversation
+      extractedInfo = await extractInfoFromConversation(session.messages);
+      console.log('LLM Extracted info for description:', extractedInfo);
+    } else {
+      // Use simple pattern matching for other fields
+      extractedInfo = extractInfoSimple(userMessage, currentAction);
+      console.log('Simple extracted info:', extractedInfo);
+    }
+    
+    // Update collected info only with non-null values
+    Object.keys(extractedInfo).forEach(key => {
+      if (extractedInfo[key] !== null && extractedInfo[key] !== '') {
+        session.collected_info[key] = extractedInfo[key];
+      }
+    });
+    
+    // Determine current action after extraction
+    const action = determineChatAction(session.collected_info, session.messages.length);
+    session.current_step = action;
+    
+    // Generate template response instead of calling LM Studio
+    let response;
+    
+    if (action === 'asking_description') {
+      // Use template response for asking description
+      response = getTemplateResponse(action, session.collected_info, userMessage);
+    } else {
+      // Use template response for other steps
+      response = getTemplateResponse(action, session.collected_info, userMessage);
+    }
     
     // Add bot response to session
     session.messages.push({
@@ -491,24 +595,6 @@ Berdasarkan konteks di atas, berikan respons yang sesuai untuk melanjutkan pengu
       content: response,
       timestamp: new Date()
     });
-
-    // Extract information from the entire conversation (only if not greeting)
-    let extractedInfo = {};
-    if (session.messages.length > 2) {
-      extractedInfo = await extractInfoFromConversation(session.messages);
-      console.log('Extracted info:', extractedInfo);
-      
-      // Update collected info only with non-null values
-      Object.keys(extractedInfo).forEach(key => {
-        if (extractedInfo[key] !== null && extractedInfo[key] !== '') {
-          session.collected_info[key] = extractedInfo[key];
-        }
-      });
-    }
-    
-    // Determine current action
-    const action = determineChatAction(session.collected_info, session.messages.length);
-    session.current_step = action;
     
     // Generate suggestions
     const suggestions = generateSuggestions(action, session.collected_info);
@@ -520,7 +606,30 @@ Berdasarkan konteks di atas, berikan respons yang sesuai untuk melanjutkan pengu
     // Handle confirmation step
     if (action === 'ready_for_confirmation' && !session.needs_confirmation) {
       session.needs_confirmation = true;
-      const confirmationMessage = generateConfirmationSummary(session.collected_info);
+      
+      // Generate AI summary for description
+      const aiGeneratedDescription = await generateDescriptionSummary(session.messages, session.collected_info);
+      
+      // Update the collected info with AI-generated description for the summary
+      const summaryInfo = { 
+        ...session.collected_info, 
+        description: aiGeneratedDescription 
+      };
+      
+      const confirmationMessage = `
+📋 RINGKASAN KELUHAN ANDA
+
+👤 Nama: ${summaryInfo.full_name || 'Belum diisi'}
+💳 No. Rekening: ${summaryInfo.account_number || 'Belum diisi'}
+📱 Channel: ${summaryInfo.channel || 'Belum diisi'}
+📂 Kategori: ${summaryInfo.category || 'Belum diisi'}
+📝 Deskripsi: ${summaryInfo.description || 'Belum diisi'}
+
+Apakah data di atas sudah benar? Silakan konfirmasi atau beri tahu jika ada yang perlu diperbaiki.
+      `.trim();
+      
+      // Store the AI-generated description in session for final save
+      session.collected_info.ai_generated_description = aiGeneratedDescription;
       
       // Override the LLM response with confirmation summary
       session.messages[session.messages.length - 1].content = confirmationMessage;
@@ -531,7 +640,7 @@ Berdasarkan konteks di atas, berikan respons yang sesuai untuk melanjutkan pengu
         action: action,
         next_question: null,
         suggestions: generateSuggestions(action, session.collected_info),
-        collected_info: session.collected_info,
+        collected_info: { ...session.collected_info, description: aiGeneratedDescription }, // Show AI description in UI
         is_complete: false,
         confidence: computeConfidence(session.collected_info),
         needs_confirmation: true
@@ -543,6 +652,12 @@ Berdasarkan konteks di atas, berikan respons yang sesuai untuk melanjutkan pengu
       if (userMessage.toLowerCase().includes('ya') || userMessage.toLowerCase().includes('benar') || userMessage.toLowerCase().includes('setuju')) {
         session.is_complete = true;
         session.needs_confirmation = false;
+        
+        // Use AI-generated description for final data
+        if (session.collected_info.ai_generated_description) {
+          session.collected_info.description = session.collected_info.ai_generated_description;
+          delete session.collected_info.ai_generated_description; // Clean up temporary field
+        }
         
         const finalMessage = "✅ Terima kasih! Keluhan Anda telah berhasil dicatat. Tim kami akan segera menindaklanjuti keluhan Anda sesuai dengan SLA yang berlaku. Anda akan dihubungi melalui channel yang tersedia.";
         
