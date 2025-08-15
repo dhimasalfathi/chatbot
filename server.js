@@ -31,7 +31,7 @@ const PORT = process.env.PORT || (process.env.NODE_ENV === 'production' ? 8080 :
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // Smart LM Studio URL detection
-const LM_BASE_URL = "https://6a7d04fe49a2.ngrok-free.app/v1";
+const LM_BASE_URL = getLMStudioURL();
 const LM_API_KEY  = process.env.LM_API_KEY  || 'lm-studio';
 const LM_MODEL    = process.env.LM_MODEL    || 'qwen2.5-7b-instruct-1m';
 const LM_TEMPERATURE = parseFloat(process.env.LM_TEMPERATURE) || 0.8;
