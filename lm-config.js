@@ -33,14 +33,30 @@ function getLMStudioURL() {
     const fs = require('fs');
     const ngrokFile = require('path').join(__dirname, 'ngrok-url.txt');
     if (fs.existsSync(ngrokFile)) {
-      const ngrokUrl = fs.readFileSync(ngrokFile, 'utf8').trim();
-      if (ngrokUrl.startsWith('http')) {
-        console.log(`🔧 Using ngrok URL from file: ${ngrokUrl}/v1`);
+      const content = fs.readFileSync(ngrokFile, 'utf8');
+      
+      // Parse different formats
+      let ngrokUrl = null;
+      
+      // Try to extract from export statement
+      const exportMatch = content.match(/export\s+LM_BASE_URL\s*=\s*['"](https?:\/\/[^'"]+)['"]/);
+      if (exportMatch) {
+        ngrokUrl = exportMatch[1].replace('/v1', ''); // Remove /v1 suffix if exists
+      } else {
+        // Try to find any HTTP URL in the file
+        const urlMatch = content.match(/(https?:\/\/[^\s\n#]+)/);
+        if (urlMatch) {
+          ngrokUrl = urlMatch[1].replace('/v1', ''); // Remove /v1 suffix if exists
+        }
+      }
+      
+      if (ngrokUrl) {
+        console.log(`🔧 Using URL from ngrok-url.txt: ${ngrokUrl}/v1`);
         return `${ngrokUrl}/v1`;
       }
     }
   } catch (e) {
-    // Ignore file read errors
+    console.warn('⚠️ Error reading ngrok-url.txt:', e.message);
   }
   
   // Priority 3: Environment-specific defaults

@@ -1,15 +1,1 @@
-# Cara setup ngrok untuk LM Studio:
-# 1. Install ngrok: npm install -g ngrok
-# 2. Configure LM Studio:
-#    - Host: 0.0.0.0 (bukan localhost!)
-#    - Port: 1234
-#    - Enable "Allow external requests"
-# 3. Start LM Studio server
-# 4. Run ngrok: ngrok http 1234
-# 5. Copy public URL ke file ini (hapus comment ini dan ganti dengan URL)
-
-# Contoh format:
-# https://abc123def456.ngrok-free.app
-
-# Atau set environment variable:
-# export LM_BASE_URL="https://abc123def456.ngrok-free.app/v1"
+https://5klclrqb-1234.asse.devtunnels.ms

@@ -22,7 +22,6 @@ const crypto = require('crypto');
 const fs = require('fs');
 const { parse: csvParse } = require('csv-parse/sync');
 const { getLocalIP, getNetworkConfig } = require('./network-config');
-const { detectEnvironment, getLMStudioURL, getDeploymentInstructions } = require('./lm-config');
 
 // -----------------------------
 // Config
@@ -30,28 +29,16 @@ const { detectEnvironment, getLMStudioURL, getDeploymentInstructions } = require
 const PORT = process.env.PORT || (process.env.NODE_ENV === 'production' ? 8080 : 5000);
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
-// Smart LM Studio URL detection
-const LM_BASE_URL = getLMStudioURL();
+// LM Studio configuration - simple environment variable or default
+const LM_BASE_URL = process.env.LM_BASE_URL || 'http://localhost:1234/v1';
 const LM_API_KEY  = process.env.LM_API_KEY  || 'lm-studio';
 const LM_MODEL    = process.env.LM_MODEL    || 'qwen2.5-7b-instruct-1m';
 const LM_TEMPERATURE = parseFloat(process.env.LM_TEMPERATURE) || 0.8;
 
-// Environment detection
-const environment = detectEnvironment();
-const deploymentInfo = getDeploymentInstructions();
-
-console.log(`🔧 Environment: ${NODE_ENV} (${deploymentInfo.environment})`);
+console.log(`🔧 Environment: ${NODE_ENV}`);
 console.log(`🌐 Port: ${PORT}`);
 console.log(`🤖 LM Studio: ${LM_BASE_URL}`);
 console.log(`🌡️ Temperature: ${LM_TEMPERATURE}`);
-
-// Show deployment instructions if needed
-if (environment.isGCP || environment.isProduction) {
-  console.log(`\n📋 DEPLOYMENT SETUP REQUIRED:`);
-  deploymentInfo.instructions.forEach((instruction, i) => {
-    console.log(`   ${instruction}`);
-  });
-}
 
 // -----------------------------
 // Load SLA knowledge base from CSV
@@ -1076,7 +1063,6 @@ app.get('/chatbot', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  const networkConfig = getNetworkConfig();
   const LOCAL_IP = getLocalIP();
   
   console.log(`🚀 Chat-to-Form server running on http://0.0.0.0:${PORT}`);
@@ -1086,7 +1072,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🌐 Network Access:`);
   console.log(`   Server binding to all interfaces (0.0.0.0:${PORT})`);
   console.log(`   Local IP detected: ${LOCAL_IP}`);
-  console.log(`   Environment: ${deploymentInfo.environment}`);
+  console.log(`   Environment: ${NODE_ENV}`);
   
   if (NODE_ENV === 'production') {
     console.log(`🔴 Production mode - server will run in background`);
@@ -1096,26 +1082,9 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`💡 Use './start-server.sh production' for persistent running`);
   }
   
-  console.log(`\n📡 External Access URLs:`);
-  console.log(`   Chatbot: ${networkConfig.chatbotURL}`);
-  console.log(`   API: ${networkConfig.apiURL}`);
-  
-  if (environment.isLocal) {
-    console.log(`   LM Studio: ${networkConfig.lmStudioURL}`);
-    console.log(`\n🔧 LM Studio Setup Instructions:`);
-    console.log(`   1. Open LM Studio → Local Server`);
-    console.log(`   2. Set Host: 0.0.0.0 (not localhost!)`);
-    console.log(`   3. Set Port: 1234`);
-    console.log(`   4. Enable "Allow external requests"`);
-    console.log(`   5. Start the server`);
-  } else {
-    console.log(`\n🔧 GCP Deployment Configuration:`);
-    console.log(`   Current LM URL: ${LM_BASE_URL}`);
-    if (LM_BASE_URL.includes('YOUR_LAPTOP_IP')) {
-      console.log(`   ⚠️  Please configure LM_BASE_URL environment variable!`);
-      console.log(`   ⚠️  Or create ngrok-url.txt file with your ngrok URL`);
-    }
-  }
+  console.log(`\n🔧 Configuration:`);
+  console.log(`   Current LM URL: ${LM_BASE_URL}`);
+  console.log(`   To change LM URL: export LM_BASE_URL="https://your-ngrok-url.ngrok.io/v1"`);
   
   console.log(`\n🔥 Firewall Setup (Run as Administrator):`);
   console.log(`   netsh advfirewall firewall add rule name="LM Studio" dir=in action=allow protocol=TCP localport=1234`);

@@ -322,7 +322,8 @@
   <script>
     class ChatBot {
       constructor() {
-        this.baseUrl = 'http://localhost:5000';
+        // Dynamic base URL detection
+        this.baseUrl = this.detectBaseUrl();
         this.sessionId = null;
         this.isTyping = false;
         
@@ -332,7 +333,23 @@
         this.startConversation();
       }
       
+      detectBaseUrl() {
+        // If running on same domain, use relative path
+        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+          // Production/GCP - use same origin
+          const url = window.location.origin;
+          console.log('🌐 Production mode detected, using URL:', url);
+          return url;
+        } else {
+          // Local development
+          const url = 'http://localhost:5000';
+          console.log('🔧 Local development mode detected, using URL:', url);
+          return url;
+        }
+      }
+      
       initElements() {
+        console.log('🚀 ChatBot initialized with baseUrl:', this.baseUrl);
         this.chatMessages = document.getElementById('chatMessages');
         this.chatInput = document.getElementById('chatInput');
         this.sendBtn = document.getElementById('sendBtn');
