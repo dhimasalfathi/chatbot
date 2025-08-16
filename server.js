@@ -24,7 +24,7 @@ const {
 // -----------------------------
 // Config
 // -----------------------------
-const PORT = process.env.PORT || 99;
+const PORT = process.env.PORT || 4000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // LM Studio configuration - simple environment variable or default
