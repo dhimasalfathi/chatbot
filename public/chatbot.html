@@ -341,8 +341,8 @@
           console.log('🌐 Production mode detected, using URL:', url);
           return url;
         } else {
-          // Local development
-          const url = 'http://localhost:5000';
+          // Local development - use same port as current page
+          const url = window.location.origin;
           console.log('🔧 Local development mode detected, using URL:', url);
           return url;
         }
