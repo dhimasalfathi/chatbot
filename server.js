@@ -158,8 +158,8 @@ app.get('/socket-status', (req, res) => {
 // -----------------------------
 // Start Server
 // -----------------------------
-server.listen(PORT, 'localhost', () => {
-  console.log(`🚀 Integrated Chatbot + Socket.IO Server running on http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Integrated Chatbot + Socket.IO Server running on http://0.0.0.0:${PORT}`);
   console.log(`📋 API Tester: http://localhost:${PORT}/`);
   console.log(`💬 Chatbot Interface: http://localhost:${PORT}/chatbot`);
   console.log(`🔌 Socket.IO Test: http://localhost:${PORT}/socket-test.html`);
@@ -167,7 +167,7 @@ server.listen(PORT, 'localhost', () => {
   console.log(`\n📊 Service Info:`);
   console.log(`   Environment: ${NODE_ENV}`);
   console.log(`   Features: REST API + Socket.IO + Real-time Chat`);
-  console.log(`   Access: Local only (use nginx for external access)`);
+  console.log(`   Access: All interfaces (nginx reverse proxy)`);
   
   if (NODE_ENV === 'production') {
     console.log(`🔴 Production mode - service running`);

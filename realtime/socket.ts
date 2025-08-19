@@ -2,10 +2,10 @@ import { io, Socket } from "socket.io-client";
 
 // Development URLs
 const LOCAL_URL = "http://localhost:4000";
-const TUNNEL_URL = "https://t22bhmg5-4000.asse.devtunnels.ms/";
+const TUNNEL_URL = "https://bcare.my.id"; // Production domain
 const NETWORK_URL = "http://192.168.226.76:4000";
 
-// Use local for development, tunnel for external access
+// Use local for development, production domain for production
 export const SOCKET_URL = process.env.NODE_ENV === "production" 
   ? TUNNEL_URL 
   : LOCAL_URL;
