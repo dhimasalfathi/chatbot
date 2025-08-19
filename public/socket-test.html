@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Socket.IO Test Client</title>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        button { margin: 5px; padding: 10px 15px; cursor: pointer; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+        .log { background: #f8f9fa; padding: 10px; margin: 10px 0; border-radius: 5px; height: 200px; overflow-y: scroll; }
+        input[type="text"] { padding: 8px; margin: 5px; width: 200px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 Socket.IO Test Client</h1>
+        
+        <div class="section">
+            <h3>Connection Status</h3>
+            <div id="status" class="status disconnected">Disconnected</div>
+            <button id="connect">Connect</button>
+            <button id="disconnect">Disconnect</button>
+        </div>
+
+        <div class="section">
+            <h3>Authentication</h3>
+            <input type="text" id="userId" placeholder="Enter User ID" value="user123">
+            <button id="register">Register User</button>
+        </div>
+
+        <div class="section">
+            <h3>Direct Message</h3>
+            <input type="text" id="toUserId" placeholder="Target User ID" value="user456">
+            <button id="openDM">Open DM</button>
+            <button id="joinDM">Join DM Room</button>
+            <br>
+            <input type="text" id="dmRoom" placeholder="DM Room" value="dm:user123:user456">
+        </div>
+
+        <div class="section">
+            <h3>Chat</h3>
+            <input type="text" id="chatRoom" placeholder="Chat Room" value="dm:user123:user456">
+            <input type="text" id="message" placeholder="Type message..." value="Hello from web client!">
+            <button id="sendMessage">Send Message</button>
+        </div>
+
+        <div class="section">
+            <h3>Event Log</h3>
+            <button id="clearLog">Clear Log</button>
+            <div id="log" class="log"></div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration URLs
+        const LOCAL_URL = 'http://localhost:4000';
+        const TUNNEL_URL = 'https://your-tunnel-url.com'; // Update with your tunnel URL
+        const NETWORK_URL = 'http://192.168.226.76:4000';
+        
+        // Choose which URL to use
+        const SOCKET_URL = LOCAL_URL; // Change this for different environments
+        
+        const log = document.getElementById('log');
+        const status = document.getElementById('status');
+        
+        function addLog(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.innerHTML = `[${timestamp}] ${message}`;
+            logEntry.style.color = type === 'error' ? 'red' : type === 'success' ? 'green' : 'black';
+            log.appendChild(logEntry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        // Initialize socket with configurable URL
+        const socket = io(SOCKET_URL, {
+            transports: ['websocket', 'polling'],
+            autoConnect: false
+        });
+
+        // Add URL info to log
+        addLog(`🔗 Connecting to: ${SOCKET_URL}`);
+
+        // Socket event listeners
+        socket.on('connect', () => {
+            status.textContent = `Connected (${socket.id})`;
+            status.className = 'status connected';
+            addLog(`✅ Connected with ID: ${socket.id}`, 'success');
+        });
+
+        socket.on('disconnect', (reason) => {
+            status.textContent = 'Disconnected';
+            status.className = 'status disconnected';
+            addLog(`❌ Disconnected: ${reason}`, 'error');
+        });
+
+        socket.on('connect_error', (error) => {
+            addLog(`❌ Connection Error: ${error.message}`, 'error');
+        });
+
+        // Auth events
+        socket.on('auth:ok', (data) => {
+            addLog(`✅ Auth OK: ${JSON.stringify(data)}`, 'success');
+        });
+
+        // DM events
+        socket.on('dm:pending', (data) => {
+            addLog(`⏳ DM Pending: ${JSON.stringify(data)}`, 'info');
+        });
+
+        socket.on('dm:request', (data) => {
+            addLog(`📩 DM Request: ${JSON.stringify(data)}`, 'info');
+        });
+
+        socket.on('dm:ready', (data) => {
+            addLog(`✅ DM Ready: ${JSON.stringify(data)}`, 'success');
+        });
+
+        // Chat events
+        socket.on('chat:new', (data) => {
+            addLog(`💬 New Message: ${JSON.stringify(data)}`, 'success');
+        });
+
+        // Presence events
+        socket.on('presence:list', (data) => {
+            addLog(`👥 Presence: ${JSON.stringify(data)}`, 'info');
+        });
+
+        // Button events
+        document.getElementById('connect').onclick = () => socket.connect();
+        document.getElementById('disconnect').onclick = () => socket.disconnect();
+        
+        document.getElementById('register').onclick = () => {
+            const userId = document.getElementById('userId').value;
+            socket.emit('auth:register', { userId });
+            addLog(`📤 Registering user: ${userId}`);
+        };
+
+        document.getElementById('openDM').onclick = () => {
+            const toUserId = document.getElementById('toUserId').value;
+            socket.emit('dm:open', { toUserId });
+            addLog(`📤 Opening DM to: ${toUserId}`);
+        };
+
+        document.getElementById('joinDM').onclick = () => {
+            const room = document.getElementById('dmRoom').value;
+            socket.emit('dm:join', { room });
+            addLog(`📤 Joining DM room: ${room}`);
+        };
+
+        document.getElementById('sendMessage').onclick = () => {
+            const room = document.getElementById('chatRoom').value;
+            const message = document.getElementById('message').value;
+            const userId = document.getElementById('userId').value;
+            
+            const msgData = {
+                room,
+                message,
+                from: userId,
+                timestamp: new Date().toISOString()
+            };
+            
+            socket.emit('chat:send', msgData);
+            addLog(`📤 Sent: ${JSON.stringify(msgData)}`);
+        };
+
+        document.getElementById('clearLog').onclick = () => {
+            log.innerHTML = '';
+        };
+
+        addLog('🚀 Socket.IO Test Client loaded. Click Connect to start.');
+    </script>
+</body>
+</html>

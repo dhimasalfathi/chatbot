@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Socket.ts Test</title>
+    <script type="module">
+        // Simulate TypeScript socket.ts functionality 
+        import { io } from 'https://cdn.socket.io/4.8.1/socket.io.esm.min.js';
+        
+        // Replicate socket.ts logic
+        const LOCAL_URL = "http://localhost:4000";
+        const TUNNEL_URL = "https://t22bhmg5-4000.asse.devtunnels.ms/";
+        
+        const SOCKET_URL = LOCAL_URL; // Use local for testing
+        
+        let socket = null;
+        
+        function getSocket() {
+            if (!socket) {
+                socket = io(SOCKET_URL, {
+                    transports: ["websocket", "polling"],
+                    path: "/socket.io",
+                    withCredentials: false,
+                    autoConnect: true,
+                    reconnection: true,
+                    reconnectionAttempts: Infinity,
+                    reconnectionDelay: 500,
+                    timeout: 20000,
+                    extraHeaders: { "x-client": "expo" },
+                });
+                
+                socket.on("connect", () => {
+                    console.log("[socket] connected", socket?.id);
+                    document.getElementById('status').textContent = `Connected: ${socket.id}`;
+                });
+                
+                socket.on("disconnect", (reason) => {
+                    console.log("[socket] disconnect:", reason);
+                    document.getElementById('status').textContent = `Disconnected: ${reason}`;
+                });
+                
+                socket.on("connect_error", (err) => {
+                    console.log("[socket] connect_error:", err?.message || err);
+                    document.getElementById('status').textContent = `Error: ${err.message}`;
+                });
+            }
+            return socket;
+        }
+        
+        // Test functions
+        window.testSocket = () => {
+            const socket = getSocket();
+            console.log('Socket instance created:', socket);
+        };
+        
+        window.registerUser = () => {
+            const socket = getSocket();
+            const userId = document.getElementById('userId').value;
+            socket.emit('auth:register', { userId });
+            console.log('Registered user:', userId);
+        };
+        
+        window.openDM = () => {
+            const socket = getSocket();
+            const toUserId = document.getElementById('toUserId').value;
+            socket.emit('dm:open', { toUserId });
+            console.log('Opening DM to:', toUserId);
+        };
+    </script>
+</head>
+<body>
+    <h1>Socket.ts Test Page</h1>
+    <div id="status">Not connected</div>
+    
+    <div style="margin: 20px 0;">
+        <button onclick="testSocket()">Initialize Socket</button>
+    </div>
+    
+    <div style="margin: 20px 0;">
+        <input id="userId" placeholder="User ID" value="user123">
+        <button onclick="registerUser()">Register User</button>
+    </div>
+    
+    <div style="margin: 20px 0;">
+        <input id="toUserId" placeholder="Target User ID" value="user456">
+        <button onclick="openDM()">Open DM</button>
+    </div>
+</body>
+</html>
