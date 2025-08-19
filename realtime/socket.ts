@@ -2,7 +2,7 @@ import { io, Socket } from "socket.io-client";
 
 // Development URLs
 const LOCAL_URL = "http://localhost:4000";
-const TUNNEL_URL = "https://5klclrqb-4000.asse.devtunnels.ms"; // DevTunnels URL
+const TUNNEL_URL = "https://bcare.my.id"; // DevTunnels URL
 const NETWORK_URL = "http://192.168.100.13:4000"; // Update with your actual IP
 
 // Use local for development, DevTunnels for production

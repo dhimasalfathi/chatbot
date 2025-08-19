@@ -59,6 +59,10 @@ app.get('/chatbot', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'chatbot.html'));
 });
 
+app.get('/socket-test', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'socket-test.html'));
+});
+
 // -----------------------------
 // Socket.IO Real-time Features
 // -----------------------------
@@ -175,7 +179,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Integrated Chatbot + Socket.IO Server running on http://0.0.0.0:${PORT}`);
   console.log(`📋 API Tester: http://localhost:${PORT}/`);
   console.log(`💬 Chatbot Interface: http://localhost:${PORT}/chatbot`);
-  console.log(`🔌 Socket.IO Test: http://localhost:${PORT}/socket-test.html`);
+  console.log(`🔌 Socket.IO Test: http://localhost:${PORT}/socket-test`);
   console.log(`📊 Socket Status: http://localhost:${PORT}/socket-status`);
   console.log(`\n📊 Service Info:`);
   console.log(`   Environment: ${NODE_ENV}`);
