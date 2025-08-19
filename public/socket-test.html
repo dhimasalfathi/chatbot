@@ -60,11 +60,34 @@
     <script>
         // Configuration URLs
         const LOCAL_URL = 'http://localhost:4000';
-        const TUNNEL_URL = 'https://your-tunnel-url.com'; // Update with your tunnel URL
-        const NETWORK_URL = 'http://192.168.226.76:4000';
+        const TUNNEL_URL = 'https://5klclrqb-4000.asse.devtunnels.ms'; // DevTunnels URL
         
-        // Choose which URL to use
-        const SOCKET_URL = LOCAL_URL; // Change this for different environments
+        // Auto-detect current host and use same for Socket.IO
+        function getSocketURL() {
+            const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+            const host = window.location.host;
+            
+            // If accessing via localhost, use localhost
+            if (host.includes('localhost') || host.includes('127.0.0.1')) {
+                return LOCAL_URL;
+            }
+            
+            // If accessing via DevTunnels
+            if (host.includes('devtunnels.ms')) {
+                return `https://${host}`;
+            }
+            
+            // If accessing via production domain
+            if (host.includes('bcare.my.id')) {
+                return 'https://bcare.my.id';
+            }
+            
+            // If accessing via IP, use same IP with port 4000
+            const currentIP = host.split(':')[0]; // Remove port if exists
+            return `${protocol}//${currentIP}:4000`;
+        }
+        
+        const SOCKET_URL = getSocketURL();
         
         const log = document.getElementById('log');
         const status = document.getElementById('status');
@@ -80,8 +103,15 @@
 
         // Initialize socket with configurable URL
         const socket = io(SOCKET_URL, {
-            transports: ['websocket', 'polling'],
-            autoConnect: false
+            transports: ['polling', 'websocket'], // Prioritize polling for tunnels
+            autoConnect: false,
+            forceNew: true,
+            reconnection: true,
+            timeout: 10000,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 2000,
+            upgrade: true,
+            rememberUpgrade: false
         });
 
         // Add URL info to log

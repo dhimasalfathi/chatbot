@@ -13,13 +13,26 @@ const { setupRoutes } = require('./src/routes/routes');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*" },
-  pingInterval: 25000,
-  pingTimeout: 20000,
+  cors: { 
+    origin: "*",
+    methods: ["GET", "POST"],
+    allowedHeaders: ["*"],
+    credentials: false
+  },
   allowEIO3: true,
+  pingInterval: 25000,
+  pingTimeout: 60000,
+  transports: ['polling', 'websocket'], // Prioritize polling for tunnels
+  upgradeTimeout: 30000,
+  httpCompression: false,
+  perMessageDeflate: false
 });
 
-app.use(cors());
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["*"]
+}));
 app.use(express.json({ limit: '2mb' }));
 
 // -----------------------------

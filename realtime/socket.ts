@@ -2,10 +2,10 @@ import { io, Socket } from "socket.io-client";
 
 // Development URLs
 const LOCAL_URL = "http://localhost:4000";
-const TUNNEL_URL = "https://bcare.my.id"; // Production domain
-const NETWORK_URL = "http://192.168.226.76:4000";
+const TUNNEL_URL = "https://5klclrqb-4000.asse.devtunnels.ms"; // DevTunnels URL
+const NETWORK_URL = "http://192.168.100.13:4000"; // Update with your actual IP
 
-// Use local for development, production domain for production
+// Use local for development, DevTunnels for production
 export const SOCKET_URL = process.env.NODE_ENV === "production" 
   ? TUNNEL_URL 
   : LOCAL_URL;
@@ -15,14 +15,16 @@ let socket: Socket | null = null;
 export const getSocket = () => {
   if (!socket) {
     socket = io(SOCKET_URL, {
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"], // Prioritize polling for tunnels
       path: "/socket.io",
       withCredentials: false,
       autoConnect: true,
       reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 500,
-      timeout: 20000,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
+      timeout: 10000,
+      upgrade: true,
+      rememberUpgrade: false,
       extraHeaders: { "x-client": "expo" },
     });
 
