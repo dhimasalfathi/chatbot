@@ -92,8 +92,23 @@ function emitPresence(room) {
   io.to(room).emit("presence:list", { room, peers: peersIn(room) });
 }
 
+// Add engine error logging for debugging
+io.engine.on("connection_error", (err) => {
+  console.log(
+    "[engine] connection_error",
+    err?.code,
+    err?.message,
+    err?.context ? JSON.stringify(err.context) : ""
+  );
+});
+
 io.on("connection", (socket) => {
   console.log("🔌 Socket connected:", socket.id, "transport:", socket.conn.transport.name);
+  
+  // Add transport upgrade logging
+  socket.conn.on("upgrade", () => {
+    console.log("🔄 Transport upgraded to:", socket.conn.transport.name);
+  });
   
   // ---- IDENTITAS
   socket.on("auth:register", ({ userId }) => {
@@ -133,10 +148,22 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ---- Presence (umum)
+  socket.on("presence:get", ({ room }) => {
+    if (!room) return;
+    socket.emit("presence:list", { room, peers: peersIn(room) });
+  });
+
   // ---- Chat (TIDAK echo ke pengirim)
   socket.on("chat:send", (msg) => {
     if (!msg?.room) return;
     socket.to(msg.room).emit("chat:new", msg);
+  });
+
+  // ---- Typing indicator
+  socket.on("typing", ({ room }) => {
+    if (!room) return;
+    socket.to(room).emit("typing");
   });
 
   // ---- Mock call features
@@ -153,6 +180,30 @@ io.on("connection", (socket) => {
   socket.on("call:decline", ({ room }) => {
     if (!room) return;
     socket.to(room).emit("call:declined", {});
+  });
+
+  socket.on("call:hangup", ({ room }) => {
+    if (!room) return;
+    socket.to(room).emit("call:ended", {});
+  });
+
+  socket.on("call:frame", ({ room, data }) => {
+    if (!room || !data) return;
+    socket.to(room).emit("call:frame", { data });
+  });
+
+  // ---- Join/leave generic (kalau dipakai)
+  socket.on("join", ({ room, userId }) => {
+    if (!room) return;
+    socket.join(room);
+    if (userId) socket.data.userId = userId;
+    emitPresence(room);
+  });
+
+  socket.on("leave", ({ room }) => {
+    if (!room) return;
+    socket.leave(room);
+    emitPresence(room);
   });
 
   socket.on("disconnect", (reason) => {
