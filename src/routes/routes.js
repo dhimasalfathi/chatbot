@@ -45,6 +45,50 @@ function setupRoutes(app) {
     }
   });
 
+  // One-shot extraction endpoint - extracts complete information from single message
+  app.post('/chat/extract', async (req, res) => {
+    try {
+      const { text } = req.body;
+      
+      if (!text || typeof text !== 'string' || text.trim() === '') {
+        return res.status(400).json({ error: 'Text is required' });
+      }
+
+      // Use the extract logic directly
+      let extracted = await extractJsonWithLM(text.trim());
+      extracted = semanticAutocorrect(extracted, text.trim());
+
+      // Validate & confidence
+      const [valid, msg] = validatePayload(extracted);
+      const confidence = Number(computeConfidence(extracted).toFixed(2));
+
+      // Build summary in the requested format
+      const summary = {
+        nama: extracted.full_name ?? null,
+        no_rekening: extracted.account_number ?? null,
+        channel: extracted.channel ?? null,
+        kategori: extracted.category ?? null,
+        deskripsi: extracted.description ?? null
+      };
+
+      res.json({
+        valid,
+        message: valid ? 'Informasi berhasil diekstrak' : 'Data belum lengkap/valid.',
+        confidence,
+        extracted,
+        summary,
+        extraction_method: 'one_shot'
+      });
+    } catch (error) {
+      console.error('One-shot extraction error:', error);
+      res.status(500).json({ 
+        error: 'internal_error', 
+        detail: 'Terjadi kesalahan pada ekstraksi informasi.',
+        message: 'Maaf, terjadi kesalahan saat memproses informasi Anda.'
+      });
+    }
+  });
+
   // Get chat session info
   app.get('/chat/:session_id', (req, res) => {
     const session = CHAT_SESSIONS.get(req.params.session_id);

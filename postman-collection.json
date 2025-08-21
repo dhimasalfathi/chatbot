@@ -1,0 +1,413 @@
+{
+  "info": {
+    "name": "BNI Customer Care Chatbot API",
+    "description": "Complete API collection for testing BNI Customer Care Chatbot endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "session_id",
+      "value": "{{$randomUUID}}",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & Status",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/healthz",
+              "host": ["{{base_url}}"],
+              "path": ["healthz"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Socket.IO Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/socket-status",
+              "host": ["{{base_url}}"],
+              "path": ["socket-status"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Test LM Studio Connection",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/test-lm",
+              "host": ["{{base_url}}"],
+              "path": ["test-lm"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Chatbot API",
+      "item": [
+        {
+          "name": "Start New Chat Session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "// Save session_id from response for other requests",
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.session_id) {",
+                  "        pm.collectionVariables.set('session_id', response.session_id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Halo, saya butuh bantuan\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/chat",
+              "host": ["{{base_url}}"],
+              "path": ["chat"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Chat - Complaint Credit Card",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Saya mau komplain kartu kredit saya, namanya John Doe, rekening 1234567890\",\n  \"session_id\": \"{{session_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/chat",
+              "host": ["{{base_url}}"],
+              "path": ["chat"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Chat - Account Problem",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Rekening saya bermasalah, tidak bisa transfer. Nama saya Jane Smith rekening 9876543210\",\n  \"session_id\": \"{{session_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/chat",
+              "host": ["{{base_url}}"],
+              "path": ["chat"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Chat - Follow Up Question",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Saya ingin dihubungi besok sore sekitar jam 3-5\",\n  \"session_id\": \"{{session_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/chat",
+              "host": ["{{base_url}}"],
+              "path": ["chat"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Chat Session Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/chat/{{session_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["chat", "{{session_id}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Legacy Endpoints",
+      "item": [
+        {
+          "name": "Extract Data from Text",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Saya mau komplain kartu kredit, nama saya Ahmad Rizki, nomor rekening 1234567890123456, masalahnya limit kartu kredit tidak sesuai\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/extract",
+              "host": ["{{base_url}}"],
+              "path": ["extract"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Clarify Extracted Data",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"state_id\": \"your-state-id-here\",\n  \"answers\": {\n    \"channel\": \"mobile_banking\",\n    \"priority\": \"medium\",\n    \"standby_call_window\": \"14:00-16:00\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/clarify",
+              "host": ["{{base_url}}"],
+              "path": ["clarify"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Knowledge Base",
+      "item": [
+        {
+          "name": "Search FAQ - Balance Inquiry",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/faq?q=saldo minimum",
+              "host": ["{{base_url}}"],
+              "path": ["faq"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "saldo minimum"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search FAQ - Transfer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/faq?q=transfer antar bank",
+              "host": ["{{base_url}}"],
+              "path": ["faq"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "transfer antar bank"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search SLA - Credit Card",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/sla?q=kartu kredit&category=complaint&limit=5",
+              "host": ["{{base_url}}"],
+              "path": ["sla"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "kartu kredit"
+                },
+                {
+                  "key": "category",
+                  "value": "complaint"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search SLA - Account Issue",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/sla?q=rekening terblokir&limit=3",
+              "host": ["{{base_url}}"],
+              "path": ["sla"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "rekening terblokir"
+                },
+                {
+                  "key": "limit",
+                  "value": "3"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Frontend Test Cases",
+      "item": [
+        {
+          "name": "Complete Customer Journey",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Selamat pagi, saya mengalami masalah dengan mobile banking. Nama saya Budi Santoso, nomor rekening 1122334455667788. Aplikasi mobile banking saya error terus dan tidak bisa login. Saya mau komplain dan minta solusinya. Tolong hubungi saya hari ini antara jam 2-4 sore melalui telepon.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/chat",
+              "host": ["{{base_url}}"],
+              "path": ["chat"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Error Handling - Empty Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/chat",
+              "host": ["{{base_url}}"],
+              "path": ["chat"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Error Handling - Missing Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"session_id\": \"test-session\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/chat",
+              "host": ["{{base_url}}"],
+              "path": ["chat"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Error Handling - Invalid Session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/chat/invalid-session-id",
+              "host": ["{{base_url}}"],
+              "path": ["chat", "invalid-session-id"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

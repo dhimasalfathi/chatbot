@@ -10,7 +10,84 @@ const {
   getTemplateResponse,
   computeConfidence
 } = require('./chat-service');
+const { extractJsonWithLM } = require('./lm-studio');
+const { semanticAutocorrect } = require('../utils/classification');
 const { getTimeBasedGreeting } = require('../utils/prompts');
+
+// -----------------------------
+// Helper Functions
+// -----------------------------
+
+/**
+ * Detects if user message contains comprehensive information that can be extracted in one shot
+ */
+function detectCompleteInformation(message) {
+  const lowerMsg = message.toLowerCase();
+  
+  // Check for key indicators of complete complaint
+  const hasComplaintKeywords = ['komplain', 'keluhan', 'masalah', 'error', 'tidak bisa', 'gagal', 'salah', 'bermasalah', 'trouble'];
+  const hasPersonalInfo = /\b(nama|saya|account|rekening|nomor)\b/i.test(message);
+  const hasNumbers = /\d{8,}/i.test(message); // Account numbers typically long
+  
+  // Count information density
+  const infoIndicators = [
+    hasComplaintKeywords.some(keyword => lowerMsg.includes(keyword)),
+    hasPersonalInfo,
+    hasNumbers,
+    message.length > 50, // Reasonably detailed message
+    /\b(kartu kredit|mobile banking|internet banking|atm|transfer|gopay|tagihan|biometric|login|saldo|mutasi|tabungan|giro)\b/i.test(message)
+  ];
+  
+  const infoScore = infoIndicators.filter(Boolean).length;
+  
+  // If message seems comprehensive enough, try one-shot extraction
+  return infoScore >= 3;
+}
+
+/**
+ * Process message using one-shot extraction via /extract endpoint logic
+ */
+async function processWithExtract(message) {
+  try {
+    console.log('🔍 Attempting one-shot extraction for message:', message.substring(0, 100) + '...');
+    
+    // 1) Extract JSON via LLM
+    let extracted = await extractJsonWithLM(message);
+    console.log('✅ Extracted data:', extracted);
+
+    // 2) Semantic autocorrect
+    extracted = semanticAutocorrect(extracted, message);
+    console.log('✅ After semantic autocorrect:', extracted);
+
+    // 3) Build summary in the expected format
+    const summary = {
+      nama: extracted.full_name ?? null,
+      no_rekening: extracted.account_number ?? null,
+      channel: extracted.channel ?? null,
+      kategori: extracted.category ?? null,
+      deskripsi: extracted.description ?? null
+    };
+    
+    // Check how many fields were successfully extracted
+    const filledFields = Object.values(summary).filter(val => val !== null && val !== '').length;
+    
+    console.log(`✅ One-shot extraction success: ${filledFields}/5 fields filled`);
+    
+    return {
+      success: true,
+      extracted,
+      summary,
+      filledFields
+    };
+    
+  } catch (error) {
+    console.error('❌ One-shot extraction failed:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
 
 // -----------------------------
 // Main Chat Processing Function
@@ -32,9 +109,94 @@ async function processChatMessage(sessionId, userMessage) {
 
   // Handle first message (greeting)
   if (session.messages.length === 1) {
-    const greeting = getTimeBasedGreeting();
-    const welcomeMessage = `${greeting} Terima kasih sudah menghubungi kami. Saya akan dengan senang hati membantu Anda hari ini. Bisa saya tahu nama lengkap Anda terlebih dahulu untuk penanganan lebih baik?`;
+    // Check if the first message contains comprehensive information for one-shot extraction
+    if (detectCompleteInformation(userMessage)) {
+      console.log('🚀 Detected comprehensive first message, attempting one-shot extraction...');
+      
+      const extractResult = await processWithExtract(userMessage);
+      
+      if (extractResult.success && extractResult.filledFields >= 2) {
+        // Successfully extracted substantial information
+        console.log('✅ One-shot extraction successful, auto-filling session data');
+        
+        // Update session with extracted information
+        Object.keys(extractResult.extracted).forEach(key => {
+          if (extractResult.extracted[key] !== null && extractResult.extracted[key] !== '') {
+            session.collected_info[key] = extractResult.extracted[key];
+          }
+        });
+        
+        // Create a comprehensive response showing what was extracted
+        const extractedSummary = `
+🎯 Terima kasih! Saya telah memahami keluhan Anda. Berikut informasi yang berhasil saya catat:
+
+📋 **RINGKASAN KELUHAN ANDA**
+
+ **Channel**: ${extractResult.summary.channel || '❓ _Belum diketahui_'}
+📂 **Kategori**: ${extractResult.summary.kategori || '❓ _Belum diketahui_'}
+📝 **Deskripsi**: ${extractResult.summary.deskripsi || '❓ _Belum diketahui_'}
+
+${extractResult.filledFields < 3 ? 
+'⚠️ Beberapa informasi masih kurang lengkap. Saya akan membantu melengkapinya.' : 
+'✅ Informasi sudah lengkap!'}
+
+Apakah data di atas sudah benar? Jika ada yang perlu diperbaiki atau dilengkapi, silakan beritahu saya.
+        `.trim();
+        
+        session.messages.push({
+          role: 'assistant',
+          content: extractedSummary,
+          timestamp: new Date()
+        });
+        
+        // Determine what to do next based on completeness
+        const missingFields = [];
+        if (!extractResult.summary.channel) missingFields.push('channel');
+        if (!extractResult.summary.kategori) missingFields.push('kategori');
+        if (!extractResult.summary.deskripsi) missingFields.push('deskripsi');
+        
+        let suggestions = [];
+        let nextAction = 'ready_for_confirmation';
+        
+        if (missingFields.length > 0) {
+          // Still need some information
+          nextAction = 'asking_missing_info';
+          suggestions = [
+            'Ya, data sudah benar',
+            'Ada yang perlu diperbaiki',
+            ...missingFields.map(field => `Tambahkan ${field}`)
+          ];
+        } else {
+          // All information complete, ready for confirmation
+          session.needs_confirmation = true;
+          suggestions = [
+            'Ya, data sudah benar',
+            'Ada yang perlu diperbaiki'
+          ];
+        }
+        
+        return {
+          session_id: sessionId,
+          message: extractedSummary,
+          action: nextAction,
+          next_question: null,
+          suggestions: suggestions,
+          collected_info: session.collected_info,
+          is_complete: false,
+          confidence: computeConfidence(session.collected_info),
+          extraction_method: 'one_shot',
+          extracted_summary: extractResult.summary
+        };
+      }
+    }
     
+    // Fallback to normal greeting flow
+    const greeting = getTimeBasedGreeting();
+    const welcomeMessage = 
+    `${greeting} Terima kasih sudah menghubungi B-Care. 
+    Saya BNI Assistant akan dengan senang hati membantu Anda hari ini.
+    Untuk membantu menyelesaikan masalah Anda, bisa Anda beri tahu saya channel atau platform yang Anda gunakan saat mengalami masalah ini?`;
+
     session.messages.push({
       role: 'assistant',
       content: welcomeMessage,
@@ -44,9 +206,9 @@ async function processChatMessage(sessionId, userMessage) {
     return {
       session_id: sessionId,
       message: welcomeMessage,
-      action: 'greeting',
+      action: 'asking_channel',
       next_question: null,
-      suggestions: [],
+      suggestions: ['Mobile Banking', 'Internet Banking', 'ATM', 'Kantor Cabang', 'Call Center', 'SMS Banking'],
       collected_info: session.collected_info,
       is_complete: false,
       confidence: computeConfidence(session.collected_info)
@@ -103,7 +265,7 @@ async function processChatMessage(sessionId, userMessage) {
     const suggestions = generateSuggestions(action, session.collected_info);
     
     // Check if conversation is complete
-    const requiredFields = ['full_name', 'account_number', 'channel', 'category', 'description'];
+    const requiredFields = ['channel', 'category', 'description'];
     const hasRequired = requiredFields.every(field => session.collected_info[field]);
     
     // Handle confirmation step
@@ -122,10 +284,10 @@ async function processChatMessage(sessionId, userMessage) {
       const confirmationMessage = `
 📋 RINGKASAN KELUHAN ANDA
 
-👤 Nama: ${summaryInfo.full_name || 'Belum diisi'}
-💳 No. Rekening: ${summaryInfo.account_number || 'Belum diisi'}
-📱 Channel: ${summaryInfo.channel || 'Belum diisi'}
+ Channel: ${summaryInfo.channel || 'Belum diisi'}
+
 📂 Kategori: ${summaryInfo.category || 'Belum diisi'}
+
 📝 Deskripsi: ${summaryInfo.description || 'Belum diisi'}
 
 Apakah data di atas sudah benar? Silakan konfirmasi atau beri tahu jika ada yang perlu diperbaiki.
@@ -190,7 +352,7 @@ Apakah data di atas sudah benar? Silakan konfirmasi atau beri tahu jika ada yang
           message: correctionMessage,
           action: 'asking_correction',
           next_question: null,
-          suggestions: ['Nama salah', 'No rekening salah', 'Channel salah', 'Kategori salah', 'Deskripsi salah'],
+          suggestions: ['Channel salah', 'Kategori salah', 'Deskripsi salah'],
           collected_info: session.collected_info,
           is_complete: false,
           confidence: computeConfidence(session.collected_info),

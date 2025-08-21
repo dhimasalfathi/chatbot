@@ -20,6 +20,7 @@ function validatePayload(d) {
     return [false, 'Channel tidak valid. Pilihan: Mobile Banking/Internet Banking/ATM/Kantor Cabang/Call Center/SMS Banking.'];
   }
   
+  // Optional validation for account number if provided
   if (d.account_number && !/^(\d{3}-\d{6}-\d{5}|\d{10,16})$/.test(String(d.account_number))) {
     return [false, 'Format nomor rekening tidak valid (contoh: 002-000123-77099 atau 10-16 digit).'];
   }
@@ -37,7 +38,8 @@ function validatePayload(d) {
 }
 
 function computeConfidence(extracted) {
-  const requiredFields = ['full_name', 'account_number', 'channel', 'category', 'description'];
+  // Only require channel, category, and description (skip name and account)
+  const requiredFields = ['channel', 'category', 'description'];
   const filled = requiredFields.filter(field => {
     const value = extracted[field];
     return value !== null && value !== '' && value !== undefined;
@@ -156,14 +158,13 @@ function extractInfoSimple(userMessage, currentAction) {
 
 function determineChatAction(collected_info, messageCount) {
   if (messageCount <= 2) return 'greeting';
-  if (!collected_info.full_name) return 'asking_name';
-  if (!collected_info.account_number) return 'asking_account';
+  // Skip asking for name and account number - go directly to channel
   if (!collected_info.channel) return 'asking_channel';
   if (!collected_info.category) return 'asking_category';
   if (!collected_info.description) return 'asking_description';
   
-  // Only go to confirmation if we have ALL required fields
-  const requiredFields = ['full_name', 'account_number', 'channel', 'category', 'description'];
+  // Only go to confirmation if we have required fields (excluding name and account)
+  const requiredFields = ['channel', 'category', 'description'];
   const hasAllRequired = requiredFields.every(field => {
     const value = collected_info[field];
     return value !== null && value !== '' && value !== undefined;
@@ -185,7 +186,7 @@ function generateSuggestions(action, collected_info) {
     case 'ready_for_confirmation':
       return ['Ya, data sudah benar', 'Ada yang perlu diperbaiki'];
     case 'asking_correction':
-      return ['Nama salah', 'No rekening salah', 'Channel salah', 'Kategori salah', 'Deskripsi salah'];
+      return ['Channel salah', 'Kategori salah', 'Deskripsi salah'];
     default:
       return [];
   }
@@ -261,20 +262,14 @@ function createChatSession() {
 // Template responses for each step
 function getTemplateResponse(action, collected_info, userMessage) {
   switch (action) {
-    case 'asking_name':
-      return "Terima kasih sudah memberikan informasinya! Sekarang, bisa saya tahu nama lengkap Anda terlebih dahulu untuk penanganan lebih baik?";
-    
-    case 'asking_account':
-      return `Terima kasih atas informasinya, ${collected_info.full_name}! Sekarang, bisa saya tanyakan nomor rekening yang Anda gunakan untuk menghadapi masalah ini? Pastikan nomor rekening diinput dalam format yang benar yaitu 002-000123-77099 atau minimal 10-16 digit angka.`;
-    
     case 'asking_channel':
-      return `Terima kasih sudah memberikan nomor rekeningnya, ${collected_info.full_name}. Selanjutnya, bisa Anda beri tahu saya channel atau platform yang Anda gunakan saat mengalami masalah ini?`;
+      return "Terima kasih sudah menghubungi B-Care! Untuk membantu menyelesaikan masalah Anda, bisa Anda beri tahu saya channel atau platform yang Anda gunakan saat mengalami masalah ini?";
     
     case 'asking_category':
-      return `Terima kasih sudah memberikan informasinya, ${collected_info.full_name}. Sekarang, untuk membantu kita mengatasi masalah Anda dengan cepat dan tepat, bisa Anda beri tahu saya jenis keluhan yang Anda alami?`;
+      return `Terima kasih sudah memberikan informasinya. Sekarang, untuk membantu kita mengatasi masalah Anda dengan cepat dan tepat, bisa Anda beri tahu saya jenis keluhan yang Anda alami?`;
     
     case 'asking_description':
-      return `Terima kasih sudah memberikan informasinya, ${collected_info.full_name}. Kategori keluhan "${collected_info.category}" telah dipilih. Sekarang, silakan beri saya deskripsi detail masalah yang Anda alami. Jelaskan secara lengkap apa yang terjadi, kapan masalah terjadi, dan langkah apa yang sudah Anda coba.`;
+      return `Terima kasih sudah memberikan informasinya. Kategori keluhan "${collected_info.category}" telah dipilih. Sekarang, silakan beri saya deskripsi detail masalah yang Anda alami. Jelaskan secara lengkap apa yang terjadi, kapan masalah terjadi, dan langkah apa yang sudah Anda coba.`;
     
     default:
       return "Terima kasih atas informasinya. Silakan lanjutkan dengan memberikan detail yang diminta.";

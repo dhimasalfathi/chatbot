@@ -1,0 +1,25 @@
+{
+  "id": "chatbot-environment",
+  "name": "Chatbot Environment",
+  "values": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "enabled": true,
+      "type": "default"
+    },
+    {
+      "key": "production_url",
+      "value": "https://your-production-domain.com",
+      "enabled": false,
+      "type": "default"
+    },
+    {
+      "key": "session_id",
+      "value": "",
+      "enabled": true,
+      "type": "default"
+    }
+  ],
+  "_postman_variable_scope": "environment"
+}

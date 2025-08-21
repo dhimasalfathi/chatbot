@@ -502,8 +502,6 @@
         panel.appendChild(title);
         
         const fields = [
-          { key: 'full_name', label: 'Nama' },
-          { key: 'account_number', label: 'No Rekening' },
           { key: 'channel', label: 'Channel' },
           { key: 'category', label: 'Category' },
           { key: 'description', label: 'Deskripsi' }
@@ -541,17 +539,25 @@
         if (data.action) {
           const statusMap = {
             'greeting': 'Menyapa',
-            'asking_name': 'Menanyakan nama',
-            'asking_account': 'Menanyakan rekening',
             'asking_channel': 'Menanyakan channel',
             'asking_category': 'Menanyakan kategori',
             'asking_description': 'Menanyakan deskripsi',
             'ready_for_confirmation': 'Siap konfirmasi',
             'asking_correction': 'Menanyakan koreksi',
+            'asking_missing_info': 'Melengkapi info',
             'completed': 'Selesai',
             'error': 'Error'
           };
-          this.chatStatusEl.textContent = statusMap[data.action] || data.action;
+          
+          let statusText = statusMap[data.action] || data.action;
+          
+          // Add extraction method indicator
+          if (data.extraction_method === 'one_shot') {
+            statusText += ' 🚀';
+            this.chatStatusEl.title = 'Menggunakan ekstraksi otomatis';
+          }
+          
+          this.chatStatusEl.textContent = statusText;
         }
       }
       
