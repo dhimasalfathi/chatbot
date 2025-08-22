@@ -1,0 +1,66 @@
+{
+  "PEMBAYARAN": {
+    "KARTU KREDIT BNI": [ "ATM", "IBANK", "MBANK" ],
+    "KARTU KREDIT BANK LAIN": [ "ATM", "IBANK", "MBANK" ],
+    "PLN VIA ATM BANK LAIN": [ "ATM" ],
+    "SAMSAT": [ "ATM", "IBANK", "MBANK" ],
+    "TELKOM TELKOMSEL INDOSAT PROVIDER LAINNYA": [ "ATM", "IBANK", "MBANK" ],
+    "MPNG2": [ "ATM" ],
+    "MPNG3": [ "IBANK" ],
+    "MPNG4": [ "MBANK" ]
+  },
+  "TOP UP": {
+    "DANA": [ "ATM", "IBANK", "MBANK" ],
+    "GOPAY": [ "ATM", "IBANK", "MBANK" ],
+    "OVO": [ "ATM", "IBANK", "MBANK" ],
+    "PULSA": [ "ATM", "IBANK", "MBANK" ],
+    "SHOPEE PAY": [ "ATM", "IBANK", "MBANK" ],
+    "LINKAJA": [ "ATM", "IBANK", "MBANK" ],
+    "PULSA VIA ATM BANK LAIN": [ "ATM" ],
+    "E MONEY": [ "ATM" ]
+  },
+  "TRANSFER": {
+    "ANTAR REKENING BNI": [ "IBANK", "MBANK" ],
+    "ATM ALTO DANA TDK MASUK": [ "ATM", "IBANK", "MBANK" ],
+    "ATM BERSAMA DANA TDK MASUK": [ "ATM", "IBANK", "MBANK" ],
+    "ATM LINK DANA TDK MASUK": [ "ATM", "IBANK", "MBANK" ],
+    "ATM PRIMA DANA TDK MASUK": [ "ATM", "IBANK", "MBANK" ],
+    "ATM ALTO BILATERAL": [ "ATM", "IBANK", "MBANK" ],
+    "ATM PRIMA BILATERAL": [ "ATM", "IBANK", "MBANK" ],
+    "ATM BERSAMA BILATERAL": [ "IBANK", "MBANK" ],
+    "ATM ALTO LINK BILATERAL": [ "IBANK", "MBANK" ]
+  },
+  "TARIK TUNAI": {
+    "DI MESIN ATM BNI": [ "ATM" ],
+    "DI ATM LINK": [ "ATM" ],
+    "DI JARINGAN ALTO": [ "ATM" ],
+    "DI JARINGAN BERSAMA": [ "ATM" ],
+    "DI ATM CIRRUS": [ "ATM" ]
+  },
+  "SETOR TUNAI": {
+    "DI MESIN ATM CRM": [ "CRM" ]
+  },
+  "MOBILE TUNAI": {
+    "ALFAMART": [ "MTUNAI ALFAMART" ],
+    "ALFAMIDI": [ "MBANK" ],
+    "INDOMARET": [ "MBANK" ],
+    "UMUM": [ "MBANK" ]
+  },
+  "BI FAST": {
+    "GAGAL HAPUS AKUN": [ "MBANK" ],
+    "GAGAL MIGRASI AKUN": [ "MBANK" ],
+    "GAGAL SUSPEND AKUN": [ "MBANK" ],
+    "GAGAL UPDATE AKUN": [ "MBANK" ],
+    "DANA TIDAK MASUK": [ "MBANK" ],
+    "BILATERAL": [ "MBANK" ]
+  },
+  "DISPUTE": {
+    "2ND CHARGEBACK": [ "DISPUTE DEBIT" ],
+    "UMUM": [ "DISPUTE DEBIT" ],
+    "QRIS KARTU DEBIT": [ "QRIS DEBIT" ],
+    "2ND CHARGEBACK QRIS DEBIT": [ "QRIS DEBIT" ]
+  },
+  "LAINNYA": {
+    "PERMINTAAN CCTV ATM BNI": [ "ATM" ]
+  }
+}

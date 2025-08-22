@@ -192,6 +192,22 @@ io.on("connection", (socket) => {
     socket.to(room).emit("call:frame", { data });
   });
 
+  // ---- Audio streaming handlers
+  socket.on("audio:chunk", ({ room, data }) => {
+    if (!room) return;
+    socket.to(room).emit("audio:chunk", { data, timestamp: Date.now() });
+  });
+  
+  socket.on("audio:start", ({ room }) => {
+    if (!room) return;
+    socket.to(room).emit("audio:started", { fromUserId: socket.data.userId });
+  });
+  
+  socket.on("audio:stop", ({ room }) => {
+    if (!room) return;
+    socket.to(room).emit("audio:stopped", { fromUserId: socket.data.userId });
+  });
+
   // ---- Join/leave generic (kalau dipakai)
   socket.on("join", ({ room, userId }) => {
     if (!room) return;

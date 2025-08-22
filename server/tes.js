@@ -186,5 +186,5 @@ io.on("connection", (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`${APP_NAME} listening on http://0.0.0.0:${PORT}`);
+  console.log(${APP_NAME} listening on http://0.0.0.0:${PORT});
 });

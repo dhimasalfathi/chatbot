@@ -10,14 +10,14 @@ const CHAT_SESSIONS = new Map();
 // Validation & confidence
 // -----------------------------
 function validatePayload(d) {
-  const okCat = [null, 'Top Up Gopay', 'Transfer Antar Bank', 'Pembayaran Tagihan', 'Biometric/Login Error', 'Saldo/Mutasi', 'Tabungan', 'Kartu Kredit', 'Giro', 'Lainnya'];
+  const okCat = [null, 'PEMBAYARAN', 'TOP UP', 'TRANSFER', 'TARIK TUNAI', 'SETOR TUNAI', 'MOBILE TUNAI', 'BI FAST', 'DISPUTE', 'LAINNYA'];
   if (!okCat.includes(d.category)) {
-    return [false, 'Kategori tidak valid. Pilihan: Top Up Gopay/Transfer Antar Bank/Pembayaran Tagihan/Biometric Login Error/Saldo Mutasi/Tabungan/Kartu Kredit/Giro/Lainnya.'];
+    return [false, 'Kategori tidak valid. Pilihan: PEMBAYARAN/TOP UP/TRANSFER/TARIK TUNAI/SETOR TUNAI/MOBILE TUNAI/BI FAST/DISPUTE/LAINNYA.'];
   }
   
-  const okChannel = [null, 'Mobile Banking', 'Internet Banking', 'ATM', 'Kantor Cabang', 'Call Center', 'SMS Banking'];
+  const okChannel = [null, 'ATM', 'IBANK', 'MBANK', 'CRM', 'MTUNAI ALFAMART', 'DISPUTE DEBIT', 'QRIS DEBIT'];
   if (!okChannel.includes(d.channel)) {
-    return [false, 'Channel tidak valid. Pilihan: Mobile Banking/Internet Banking/ATM/Kantor Cabang/Call Center/SMS Banking.'];
+    return [false, 'Channel tidak valid. Pilihan: ATM/IBANK/MBANK/CRM/MTUNAI ALFAMART/DISPUTE DEBIT/QRIS DEBIT.'];
   }
   
   // Optional validation for account number if provided
@@ -107,41 +107,43 @@ function extractInfoSimple(userMessage, currentAction) {
       
     case 'asking_channel':
       // Extract channel
-      if (text.includes('mobile banking') || text.includes('m-banking') || text === 'mobile banking') {
-        info.channel = 'Mobile Banking';
-      } else if (text.includes('internet banking') || text.includes('i-banking') || text === 'internet banking') {
-        info.channel = 'Internet Banking';
-      } else if (text.includes('atm') || text === 'atm') {
+      if (text.includes('atm') || text === 'atm') {
         info.channel = 'ATM';
-      } else if (text.includes('cabang') || text.includes('kantor') || text === 'kantor cabang') {
-        info.channel = 'Kantor Cabang';
-      } else if (text.includes('call center') || text.includes('telepon') || text === 'call center') {
-        info.channel = 'Call Center';
-      } else if (text.includes('sms') || text === 'sms banking') {
-        info.channel = 'SMS Banking';
+      } else if (text.includes('ibank') || text.includes('internet banking') || text === 'ibank') {
+        info.channel = 'IBANK';
+      } else if (text.includes('mbank') || text.includes('mobile banking') || text === 'mbank') {
+        info.channel = 'MBANK';
+      } else if (text.includes('crm') || text === 'crm') {
+        info.channel = 'CRM';
+      } else if (text.includes('mtunai alfamart') || text.includes('alfamart') || text === 'mtunai alfamart') {
+        info.channel = 'MTUNAI ALFAMART';
+      } else if (text.includes('dispute debit') || text === 'dispute debit') {
+        info.channel = 'DISPUTE DEBIT';
+      } else if (text.includes('qris debit') || text === 'qris debit') {
+        info.channel = 'QRIS DEBIT';
       }
       break;
       
     case 'asking_category':
       // Extract category - exact match prioritized
-      if (text === 'top up gopay' || text.includes('top up gopay')) {
-        info.category = 'Top Up Gopay';
-      } else if (text === 'transfer antar bank' || text.includes('transfer antar bank')) {
-        info.category = 'Transfer Antar Bank';
-      } else if (text === 'pembayaran tagihan' || text.includes('pembayaran tagihan')) {
-        info.category = 'Pembayaran Tagihan';
-      } else if (text.includes('biometric') || text.includes('login error')) {
-        info.category = 'Biometric/Login Error';
-      } else if (text === 'saldo/mutasi' || text.includes('saldo') || text.includes('mutasi')) {
-        info.category = 'Saldo/Mutasi';
-      } else if (text === 'tabungan' && text.length < 20) {
-        info.category = 'Tabungan';
-      } else if (text === 'kartu kredit' && text.length < 20) {
-        info.category = 'Kartu Kredit';
-      } else if (text === 'giro' && text.length < 20) {
-        info.category = 'Giro';
+      if (text === 'pembayaran' || text.includes('pembayaran')) {
+        info.category = 'PEMBAYARAN';
+      } else if (text === 'top up' || text.includes('top up')) {
+        info.category = 'TOP UP';
+      } else if (text === 'transfer' || text.includes('transfer')) {
+        info.category = 'TRANSFER';
+      } else if (text === 'tarik tunai' || text.includes('tarik tunai')) {
+        info.category = 'TARIK TUNAI';
+      } else if (text === 'setor tunai' || text.includes('setor tunai')) {
+        info.category = 'SETOR TUNAI';
+      } else if (text === 'mobile tunai' || text.includes('mobile tunai')) {
+        info.category = 'MOBILE TUNAI';
+      } else if (text === 'bi fast' || text.includes('bi fast')) {
+        info.category = 'BI FAST';
+      } else if (text === 'dispute' || text.includes('dispute')) {
+        info.category = 'DISPUTE';
       } else if (text === 'lainnya' && text.length < 20) {
-        info.category = 'Lainnya';
+        info.category = 'LAINNYA';
       }
       break;
       
@@ -180,9 +182,9 @@ function determineChatAction(collected_info, messageCount) {
 function generateSuggestions(action, collected_info) {
   switch (action) {
     case 'asking_channel':
-      return ['Mobile Banking', 'Internet Banking', 'ATM', 'Kantor Cabang', 'Call Center', 'SMS Banking'];
+      return ['ATM', 'IBANK', 'MBANK', 'CRM', 'MTUNAI ALFAMART', 'DISPUTE DEBIT', 'QRIS DEBIT'];
     case 'asking_category':
-      return ['Top Up Gopay', 'Transfer Antar Bank', 'Pembayaran Tagihan', 'Biometric/Login Error', 'Saldo/Mutasi', 'Tabungan', 'Kartu Kredit', 'Giro', 'Lainnya'];
+      return ['PEMBAYARAN', 'TOP UP', 'TRANSFER', 'TARIK TUNAI', 'SETOR TUNAI', 'MOBILE TUNAI', 'BI FAST', 'DISPUTE', 'LAINNYA'];
     case 'ready_for_confirmation':
       return ['Ya, data sudah benar', 'Ada yang perlu diperbaiki'];
     case 'asking_correction':
