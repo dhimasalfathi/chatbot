@@ -216,6 +216,208 @@ Apakah data di atas sudah benar? Jika ada yang perlu diperbaiki atau dilengkapi,
   }
 
   try {
+    // Handle correction responses FIRST - before any other processing
+    if (session.current_step === 'asking_correction') {
+      const correctionText = userMessage.toLowerCase().trim();
+      
+      console.log('Processing correction request:', correctionText);
+      
+      if (correctionText.includes('channel') || correctionText.includes('saluran')) {
+        // Reset channel and ask for it again
+        console.log('Resetting channel field');
+        session.collected_info.channel = null;
+        session.current_step = 'asking_channel';
+        session.needs_confirmation = false;
+        
+        const channelMessage = "Baik, channel mana yang benar? Silakan pilih channel yang Anda gunakan saat mengalami masalah ini.";
+        
+        // Add new bot message instead of replacing the last one
+        session.messages.push({
+          role: 'assistant',
+          content: channelMessage,
+          timestamp: new Date()
+        });
+        
+        return {
+          session_id: sessionId,
+          message: channelMessage,
+          action: 'asking_channel',
+          next_question: null,
+          suggestions: generateSuggestions('asking_channel', session.collected_info),
+          collected_info: session.collected_info,
+          is_complete: false,
+          confidence: computeConfidence(session.collected_info),
+          needs_confirmation: false
+        };
+      } else if (correctionText.includes('kategori') || correctionText.includes('category')) {
+        // Reset category and ask for it again
+        console.log('Resetting category field');
+        session.collected_info.category = null;
+        session.current_step = 'asking_category';
+        session.needs_confirmation = false;
+        
+        const categoryMessage = "Baik, kategori mana yang benar? Silakan pilih jenis keluhan yang sesuai dengan masalah Anda.";
+        
+        // Add new bot message instead of replacing the last one
+        session.messages.push({
+          role: 'assistant',
+          content: categoryMessage,
+          timestamp: new Date()
+        });
+        
+        return {
+          session_id: sessionId,
+          message: categoryMessage,
+          action: 'asking_category',
+          next_question: null,
+          suggestions: generateSuggestions('asking_category', session.collected_info),
+          collected_info: session.collected_info,
+          is_complete: false,
+          confidence: computeConfidence(session.collected_info),
+          needs_confirmation: false
+        };
+      } else if (correctionText.includes('deskripsi') || correctionText.includes('description')) {
+        // Reset description and ask for it again - will use LM model
+        console.log('Resetting description field - will use LM extraction');
+        session.collected_info.description = null;
+        if (session.collected_info.ai_generated_description) {
+          delete session.collected_info.ai_generated_description;
+        }
+        session.current_step = 'asking_description';
+        session.needs_confirmation = false;
+        
+        const descriptionMessage = "Baik, silakan berikan deskripsi yang benar. Jelaskan secara detail masalah yang Anda alami, kapan terjadi, dan langkah apa yang sudah Anda coba.";
+        
+        // Add new bot message instead of replacing the last one
+        session.messages.push({
+          role: 'assistant',
+          content: descriptionMessage,
+          timestamp: new Date()
+        });
+        
+        return {
+          session_id: sessionId,
+          message: descriptionMessage,
+          action: 'asking_description',
+          next_question: null,
+          suggestions: [],
+          collected_info: session.collected_info,
+          is_complete: false,
+          confidence: computeConfidence(session.collected_info),
+          needs_confirmation: false
+        };
+      } else {
+        // Generic correction message if user doesn't specify what to correct
+        console.log('User response not recognized, asking for clarification');
+        const genericCorrectionMessage = "Mohon sebutkan secara spesifik bagian mana yang perlu diperbaiki. Apakah itu Channel, Kategori, atau Deskripsi?";
+        
+        // Add new bot message instead of replacing the last one
+        session.messages.push({
+          role: 'assistant',
+          content: genericCorrectionMessage,
+          timestamp: new Date()
+        });
+        
+        return {
+          session_id: sessionId,
+          message: genericCorrectionMessage,
+          action: 'asking_correction',
+          next_question: null,
+          suggestions: ['Channel salah', 'Kategori salah', 'Deskripsi salah'],
+          collected_info: session.collected_info,
+          is_complete: false,
+          confidence: computeConfidence(session.collected_info),
+          needs_confirmation: false
+        };
+      }
+    }
+
+    // Handle user confirmation response
+    if (session.needs_confirmation) {
+      const userMsgLower = userMessage.toLowerCase().trim();
+      
+      // Check for correction requests first (more specific)
+      if (userMsgLower.includes('ada yang perlu diperbaiki') || 
+          userMsgLower.includes('perlu diperbaiki') ||
+          userMsgLower.includes('tidak benar') ||
+          userMsgLower.includes('salah') ||
+          userMsgLower.includes('perbaiki')) {
+        
+        console.log('User requested correction:', userMessage);
+        
+        // Reset confirmation and ask what needs to be corrected
+        session.needs_confirmation = false;
+        session.current_step = 'asking_correction';
+        
+        const correctionMessage = "Baik, ada yang perlu diperbaiki. Bisa Anda beritahu bagian mana yang perlu dikoreksi? Saya akan membantu memperbaiki data Anda.";
+        
+        session.messages[session.messages.length - 1].content = correctionMessage;
+        
+        return {
+          session_id: sessionId,
+          message: correctionMessage,
+          action: 'asking_correction',
+          next_question: null,
+          suggestions: ['Channel salah', 'Kategori salah', 'Deskripsi salah'],
+          collected_info: session.collected_info,
+          is_complete: false,
+          confidence: computeConfidence(session.collected_info),
+          needs_confirmation: false
+        };
+      } 
+      // Check for confirmation only if it's not a correction request
+      else if (userMsgLower.includes('ya') || 
+               userMsgLower.includes('benar') || 
+               userMsgLower.includes('setuju') ||
+               userMsgLower.includes('data sudah benar')) {
+        
+        console.log('User confirmed data:', userMessage);
+        
+        session.is_complete = true;
+        session.needs_confirmation = false;
+        
+        // Use AI-generated description for final data
+        if (session.collected_info.ai_generated_description) {
+          session.collected_info.description = session.collected_info.ai_generated_description;
+          delete session.collected_info.ai_generated_description; // Clean up temporary field
+        }
+        
+        const finalMessage = "✅ Terima kasih! Keluhan Anda telah berhasil dicatat. Tim kami akan segera menindaklanjuti keluhan Anda sesuai dengan SLA yang berlaku. Anda akan dihubungi melalui channel yang tersedia.";
+        
+        session.messages[session.messages.length - 1].content = finalMessage;
+        
+        return {
+          session_id: sessionId,
+          message: finalMessage,
+          action: 'completed',
+          next_question: null,
+          suggestions: [],
+          collected_info: session.collected_info,
+          is_complete: true,
+          confidence: 1.0,
+          needs_confirmation: false
+        };
+      }
+      // If neither confirmation nor correction is clearly detected, ask for clarification
+      else {
+        const clarificationMessage = "Mohon konfirmasi apakah data di atas sudah benar atau ada yang perlu diperbaiki?";
+        
+        session.messages[session.messages.length - 1].content = clarificationMessage;
+        
+        return {
+          session_id: sessionId,
+          message: clarificationMessage,
+          action: 'ready_for_confirmation',
+          next_question: null,
+          suggestions: ['Ya, data sudah benar', 'Ada yang perlu diperbaiki'],
+          collected_info: session.collected_info,
+          is_complete: false,
+          confidence: computeConfidence(session.collected_info),
+          needs_confirmation: true
+        };
+      }
+    }
+
     // Extract information from user message using simple pattern matching
     let extractedInfo = {};
     
@@ -314,7 +516,45 @@ Apakah data di atas sudah benar? Silakan konfirmasi atau beri tahu jika ada yang
     
     // Handle user confirmation response
     if (session.needs_confirmation) {
-      if (userMessage.toLowerCase().includes('ya') || userMessage.toLowerCase().includes('benar') || userMessage.toLowerCase().includes('setuju')) {
+      const userMsgLower = userMessage.toLowerCase().trim();
+      
+      // Check for correction requests first (more specific)
+      if (userMsgLower.includes('ada yang perlu diperbaiki') || 
+          userMsgLower.includes('perlu diperbaiki') ||
+          userMsgLower.includes('tidak benar') ||
+          userMsgLower.includes('salah') ||
+          userMsgLower.includes('perbaiki')) {
+        
+        console.log('User requested correction:', userMessage);
+        
+        // Reset confirmation and ask what needs to be corrected
+        session.needs_confirmation = false;
+        session.current_step = 'asking_correction';
+        
+        const correctionMessage = "Baik, ada yang perlu diperbaiki. Bisa Anda beritahu bagian mana yang perlu dikoreksi? Saya akan membantu memperbaiki data Anda.";
+        
+        session.messages[session.messages.length - 1].content = correctionMessage;
+        
+        return {
+          session_id: sessionId,
+          message: correctionMessage,
+          action: 'asking_correction',
+          next_question: null,
+          suggestions: ['Channel salah', 'Kategori salah', 'Deskripsi salah'],
+          collected_info: session.collected_info,
+          is_complete: false,
+          confidence: computeConfidence(session.collected_info),
+          needs_confirmation: false
+        };
+      } 
+      // Check for confirmation only if it's not a correction request
+      else if (userMsgLower.includes('ya') || 
+               userMsgLower.includes('benar') || 
+               userMsgLower.includes('setuju') ||
+               userMsgLower.includes('data sudah benar')) {
+        
+        console.log('User confirmed data:', userMessage);
+        
         session.is_complete = true;
         session.needs_confirmation = false;
         
@@ -339,28 +579,27 @@ Apakah data di atas sudah benar? Silakan konfirmasi atau beri tahu jika ada yang
           confidence: 1.0,
           needs_confirmation: false
         };
-      } else if (userMessage.toLowerCase().includes('perbaiki') || userMessage.toLowerCase().includes('salah') || userMessage.toLowerCase().includes('tidak benar')) {
-        // Reset confirmation and ask what needs to be corrected
-        session.needs_confirmation = false;
+      }
+      // If neither confirmation nor correction is clearly detected, ask for clarification
+      else {
+        const clarificationMessage = "Mohon konfirmasi apakah data di atas sudah benar atau ada yang perlu diperbaiki?";
         
-        const correctionMessage = "Baik, ada yang perlu diperbaiki. Bisa Anda beritahu bagian mana yang perlu dikoreksi? Saya akan membantu memperbaiki data Anda.";
-        
-        session.messages[session.messages.length - 1].content = correctionMessage;
+        session.messages[session.messages.length - 1].content = clarificationMessage;
         
         return {
           session_id: sessionId,
-          message: correctionMessage,
-          action: 'asking_correction',
+          message: clarificationMessage,
+          action: 'ready_for_confirmation',
           next_question: null,
-          suggestions: ['Channel salah', 'Kategori salah', 'Deskripsi salah'],
+          suggestions: ['Ya, data sudah benar', 'Ada yang perlu diperbaiki'],
           collected_info: session.collected_info,
           is_complete: false,
           confidence: computeConfidence(session.collected_info),
-          needs_confirmation: false
+          needs_confirmation: true
         };
       }
     }
-    
+
     session.is_complete = hasRequired && action === 'completed';
 
     return {
