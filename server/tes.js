@@ -1,190 +1,197 @@
-// server/index.js
-// Simple Socket.IO DM server (chat + mock call) with presence & debug logs
-
-const http = require("http");
-const express = require("express");
-const cors = require("cors");
-const { Server } = require("socket.io");
-
-const APP_NAME = "bni-customer-care-realtime";
-const PORT = process.env.PORT || 4000;
-const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const cors = require('cors');
 
 const app = express();
-app.use(cors({ origin: CORS_ORIGIN }));
-
-app.get("/", (_req, res) => res.send("OK"));
-app.get("/status", (_req, res) =>
-  res.json({ app: APP_NAME, status: "ok", time: new Date().toISOString() })
-);
-
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: CORS_ORIGIN },
-  pingInterval: 25000,
-  pingTimeout: 20000,
-  allowEIO3: true,
+const io = socketIo(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
 });
 
-io.engine.on("connection_error", (err) => {
-  console.log(
-    "[engine] connection_error",
-    err?.code,
-    err?.message,
-    err?.context ? JSON.stringify(err.context) : ""
-  );
-});
+app.use(cors());
+app.use(express.json());
 
-// userId -> Set<socketId>
-const userSockets = new Map();
-const addUserSocket = (userId, sid) => {
-  if (!userSockets.has(userId)) userSockets.set(userId, new Set());
-  userSockets.get(userId).add(sid);
-};
-const removeUserSocket = (userId, sid) => {
-  const set = userSockets.get(userId);
-  if (!set) return;
-  set.delete(sid);
-  if (set.size === 0) userSockets.delete(userId);
-};
-const dmRoomOf = (a, b) => dm:${[a, b].sort().join(":")};
+// Socket connection handler
+io.on('connection', (socket) => {
+  console.log('User connected:', socket.id);
 
-function peersIn(room) {
-  const r = io.sockets.adapter.rooms.get(room);
-  if (!r) return [];
-  return Array.from(r).map((sid) => {
-    const s = io.sockets.sockets.get(sid);
-    return { sid, userId: s?.data?.userId || "unknown" };
-  });
-}
-function emitPresence(room) {
-  io.to(room).emit("presence:list", { room, peers: peersIn(room) });
-}
-
-io.on("connection", (socket) => {
-  console.log(
-    "connected:",
-    socket.id,
-    "transport:",
-    socket.conn.transport.name
-  );
-  socket.conn.on("upgrade", () => {
-    console.log("transport upgraded to:", socket.conn.transport.name);
+  // Authentication
+  socket.on('auth:register', ({ userId }) => {
+    socket.userId = userId;
+    console.log(`User ${userId} registered with socket ${socket.id}`);
+    socket.emit('auth:ok');
   });
 
-  // ---- IDENTITAS
-  socket.on("auth:register", ({ userId }) => {
-    if (!userId) return;
-    socket.data.userId = userId;
-    addUserSocket(userId, socket.id);
-    socket.emit("auth:ok", { userId });
-    console.log([auth] ${socket.id} -> ${userId});
+  // Room management
+  socket.on('join', ({ room, userId }) => {
+    socket.join(room);
+    socket.userId = userId;
+    console.log(`${userId} joined room: ${room}`);
+    io.to(room).emit('presence:list', {
+      room,
+      peers: Array.from(io.sockets.adapter.rooms.get(room) || []).map(id => ({
+        sid: id,
+        userId: io.sockets.sockets.get(id)?.userId
+      }))
+    });
   });
 
-  // ---- BUKA DM BERDASAR ID
-  socket.on("dm:open", ({ toUserId }) => {
-    const from = socket.data.userId;
-    if (!from || !toUserId) return;
-    const room = dmRoomOf(from, toUserId);
-    console.log([dm:open] ${from} -> ${toUserId} = ${room});
+  socket.on('leave', ({ room, userId }) => {
+    socket.leave(room);
+    console.log(`${userId} left room: ${room}`);
+  });
 
-    socket.join(room); // inisiator join
-    emitPresence(room);
-    socket.emit("dm:pending", { room, toUserId });
+  // Presence
+  socket.on('presence:get', ({ room }) => {
+    const roomSockets = io.sockets.adapter.rooms.get(room);
+    const peers = roomSockets ? Array.from(roomSockets).map(id => ({
+      sid: id,
+      userId: io.sockets.sockets.get(id)?.userId
+    })) : [];
+    
+    socket.emit('presence:list', { room, peers });
+  });
 
-    const targets = userSockets.get(toUserId);
-    if (targets && targets.size > 0) {
-      for (const sid of targets) {
-        io.to(sid).emit("dm:request", { room, fromUserId: from });
+  // Chat messages
+  socket.on('chat:send', (message) => {
+    console.log('Chat message:', message);
+    io.to(message.room).emit('chat:new', message);
+  });
+
+  // DM (Direct Message)
+  socket.on('dm:open', ({ toUserId }) => {
+    const room = `dm:${socket.userId}:${toUserId}`;
+    socket.join(room);
+    socket.emit('dm:pending', { room });
+    
+    // Find target user and notify
+    for (const [id, s] of io.sockets.sockets) {
+      if (s.userId === toUserId) {
+        s.join(room);
+        s.emit('dm:request', { room, fromUserId: socket.userId });
+        break;
       }
     }
   });
 
-  socket.on("dm:join", ({ room }) => {
-    if (!room) return;
+  socket.on('dm:join', ({ room }) => {
     socket.join(room);
-    emitPresence(room);
-    const set = io.sockets.adapter.rooms.get(room);
-    if (set && set.size >= 2) {
-      io.to(room).emit("dm:ready", { room });
-    }
+    io.to(room).emit('dm:ready', { room });
   });
 
-  // ---- Presence (umum)
-  socket.on("presence:get", ({ room }) => {
-    if (!room) return;
-    socket.emit("presence:list", { room, peers: peersIn(room) });
+  // AUDIO CALL EVENTS
+  socket.on('audio:invite', (data) => {
+    console.log('Audio call invite:', data);
+    socket.to(data.room).emit('call:ringing', { 
+      type: 'audio',
+      from: socket.userId,
+      room: data.room 
+    });
   });
 
-  // ---- Chat (TIDAK echo ke pengirim -> hindari duplikat)
-  socket.on("chat:send", (msg) => {
-    if (!msg?.room) return;
-    socket.to(msg.room).emit("chat:new", msg); // <-- perbaikan utama
+  socket.on('audio:accept', (data) => {
+    console.log('Audio call accepted:', data);
+    socket.to(data.room).emit('audio:accepted', { 
+      from: socket.userId,
+      room: data.room 
+    });
   });
 
-  socket.on("typing", ({ room }) => {
-    if (!room) return;
-    socket.to(room).emit("typing");
+  socket.on('audio:decline', (data) => {
+    console.log('Audio call declined:', data);
+    socket.to(data.room).emit('call:declined', { 
+      type: 'audio',
+      from: socket.userId,
+      room: data.room 
+    });
   });
 
-  // ---- Mock call (opsional)
-  socket.on("call:invite", ({ room }) => {
-    if (!room) return;
-    socket.to(room).emit("call:ringing", { fromUserId: socket.data.userId });
-  });
-  socket.on("call:accept", ({ room }) => {
-    if (!room) return;
-    socket.to(room).emit("call:accepted", {});
-  });
-  socket.on("call:decline", ({ room }) => {
-    if (!room) return;
-    socket.to(room).emit("call:declined", {});
-  });
-  socket.on("call:hangup", ({ room }) => {
-    if (!room) return;
-    socket.to(room).emit("call:ended", {});
-  });
-  socket.on("call:frame", ({ room, data }) => {
-    if (!room || !data) return;
-    socket.to(room).emit("call:frame", { data });
-  });
-  
-  // Audio streaming handlers
-  socket.on("audio:chunk", ({ room, data }) => {
-    if (!room) return;
-    socket.to(room).emit("audio:chunk", { data, timestamp: Date.now() });
-  });
-  
-  socket.on("audio:start", ({ room }) => {
-    if (!room) return;
-    socket.to(room).emit("audio:started", { fromUserId: socket.data.userId });
-  });
-  
-  socket.on("audio:stop", ({ room }) => {
-    if (!room) return;
-    socket.to(room).emit("audio:stopped", { fromUserId: socket.data.userId });
+  socket.on('audio:hangup', (data) => {
+    console.log('Audio call hangup:', data);
+    socket.to(data.room).emit('call:ended', { 
+      type: 'audio',
+      from: socket.userId,
+      room: data.room 
+    });
   });
 
-  // ---- Join/leave generic (kalau dipakai)
-  socket.on("join", ({ room, userId }) => {
-    if (!room) return;
-    socket.join(room);
-    if (userId) socket.data.userId = userId;
-    emitPresence(room);
-  });
-  socket.on("leave", ({ room }) => {
-    if (!room) return;
-    socket.leave(room);
-    emitPresence(room);
+  socket.on('audio:data', (data) => {
+    socket.to(data.room).emit('audio:data', {
+      ...data,
+      from: socket.userId
+    });
   });
 
-  socket.on("disconnect", (reason) => {
-    const uid = socket.data.userId;
-    if (uid) removeUserSocket(uid, socket.id);
-    console.log("disconnected:", socket.id, "reason:", reason);
+  // VIDEO CALL EVENTS
+  socket.on('call:invite', (data) => {
+    console.log('Video call invite:', data);
+    socket.to(data.room).emit('call:ringing', { 
+      type: 'video',
+      from: socket.userId,
+      room: data.room 
+    });
+  });
+
+  socket.on('call:accept', (data) => {
+    console.log('Video call accepted:', data);
+    socket.to(data.room).emit('call:accepted', { 
+      from: socket.userId,
+      room: data.room 
+    });
+  });
+
+  socket.on('call:decline', (data) => {
+    console.log('Video call declined:', data);
+    socket.to(data.room).emit('call:declined', { 
+      type: 'video',
+      from: socket.userId,
+      room: data.room 
+    });
+  });
+
+  socket.on('call:hangup', (data) => {
+    console.log('Video call hangup:', data);
+    socket.to(data.room).emit('call:ended', { 
+      type: 'video',
+      from: socket.userId,
+      room: data.room 
+    });
+  });
+
+  socket.on('call:stream', (data) => {
+    socket.to(data.room).emit('call:stream', {
+      ...data,
+      from: socket.userId
+    });
+  });
+
+  // TICKET CONTEXT EVENTS
+  socket.on('ticket:context', (data) => {
+    console.log('Ticket context shared:', data);
+    socket.to(data.room).emit('ticket:context', {
+      ...data,
+      from: socket.userId
+    });
+  });
+
+  // Disconnect
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
   });
 });
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
-  console.log(${APP_NAME} listening on http://0.0.0.0:${PORT});
+  console.log(`🚀 BNI B-Care Server running on port ${PORT}`);
+  console.log(`📱 Audio/Video calls supported`);
+  console.log(`🔗 Socket.io path: /socket.io`);
 });
