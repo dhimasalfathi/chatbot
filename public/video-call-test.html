@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Audio/Video Call Test</title>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            background: #f5f5f5;
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .section { 
+            margin: 20px 0; 
+            padding: 15px; 
+            border: 1px solid #ddd; 
+            border-radius: 5px; 
+            background: #fafafa;
+        }
+        .video-container {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .video-section {
+            flex: 1;
+            text-align: center;
+        }
+        video {
+            width: 100%;
+            max-width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            border-radius: 10px;
+            background: #000;
+        }
+        button { 
+            margin: 5px; 
+            padding: 10px 15px; 
+            cursor: pointer; 
+            border: none;
+            border-radius: 5px;
+            background: #007bff;
+            color: white;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .btn-success { background: #28a745; }
+        .btn-danger { background: #dc3545; }
+        .btn-warning { background: #ffc107; color: #212529; }
+        .status { 
+            padding: 10px; 
+            margin: 10px 0; 
+            border-radius: 5px; 
+            font-weight: bold;
+        }
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+        .calling { background: #fff3cd; color: #856404; }
+        .log { 
+            background: #f8f9fa; 
+            padding: 10px; 
+            margin: 10px 0; 
+            border-radius: 5px; 
+            height: 300px; 
+            overflow-y: scroll; 
+            font-family: monospace;
+            font-size: 12px;
+        }
+        input[type="text"] { 
+            padding: 8px; 
+            margin: 5px; 
+            width: 200px; 
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+        .call-state {
+            font-size: 18px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .audio-visualizer {
+            width: 100%;
+            height: 60px;
+            background: #000;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 WebRTC Audio/Video Call Test</h1>
+        
+        <div class="section">
+            <h3>🔌 Connection Status</h3>
+            <div id="status" class="status disconnected">Disconnected</div>
+            <button id="connect">Connect to Server</button>
+            <button id="disconnect">Disconnect</button>
+        </div>
+
+        <div class="section">
+            <h3>👤 User Authentication</h3>
+            <input type="text" id="userId" placeholder="Your User ID" value="user123">
+            <button id="register">Register User</button>
+            <div id="authStatus"></div>
+        </div>
+
+        <div class="section">
+            <h3>📞 Call Controls</h3>
+            <input type="text" id="toUserId" placeholder="Call User ID" value="user456">
+            <br><br>
+            <button id="startAudioCall" class="btn-success">📞 Audio Call</button>
+            <button id="startVideoCall" class="btn-success">📹 Video Call</button>
+            <button id="acceptCall" class="btn-success" disabled>✅ Accept</button>
+            <button id="declineCall" class="btn-danger" disabled>❌ Decline</button>
+            <button id="hangupCall" class="btn-danger" disabled>📞 Hang Up</button>
+            <br><br>
+            <div id="callState" class="call-state">Ready to call</div>
+        </div>
+
+        <div class="section">
+            <h3>🎛️ Media Controls</h3>
+            <button id="toggleAudio">🎤 Mute Audio</button>
+            <button id="toggleVideo">📹 Stop Video</button>
+            <button id="toggleSpeaker">🔊 Speaker Off</button>
+            <button id="shareScreen">🖥️ Share Screen</button>
+            <button id="testWebRTC" class="btn-warning">🧪 Test WebRTC</button>
+        </div>
+
+        <div class="video-container">
+            <div class="video-section">
+                <h4>📹 Local Video</h4>
+                <video id="localVideo" autoplay muted playsinline></video>
+                <canvas id="localAudioVisualizer" class="audio-visualizer"></canvas>
+                <div>Your Stream</div>
+            </div>
+            <div class="video-section">
+                <h4>👥 Remote Video</h4>
+                <video id="remoteVideo" autoplay playsinline></video>
+                <canvas id="remoteAudioVisualizer" class="audio-visualizer"></canvas>
+                <div>Remote Stream</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3>🐛 Debug & Logs</h3>
+            <button id="clearLog">Clear Log</button>
+            <button id="getStats">📊 WebRTC Stats</button>
+            <button id="testAudio">🎤 Test Audio</button>
+            <div id="log" class="log"></div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const LOCAL_URL = 'http://localhost:4000';
+        const SOCKET_URL = LOCAL_URL;
+        
+        // Global variables
+        let socket = null;
+        let localStream = null;
+        let remoteStream = null;
+        let peerConnection = null;
+        let currentRoom = null;
+        let isAudioEnabled = true;
+        let isVideoEnabled = true;
+        let isSpeakerEnabled = true;
+        let currentUserId = null;
+        let remoteUserId = null;
+        let isAudioCall = false;
+        let audioContext = null;
+        let localAnalyser = null;
+        let remoteAnalyser = null;
+        
+        // WebRTC configuration with better STUN servers
+        const rtcConfig = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' }
+            ],
+            iceCandidatePoolSize: 10
+        };
+
+        // DOM elements
+        const log = document.getElementById('log');
+        const status = document.getElementById('status');
+        const callState = document.getElementById('callState');
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const authStatus = document.getElementById('authStatus');
+
+        // Utility functions
+        function addLog(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.innerHTML = `[${timestamp}] ${message}`;
+            logEntry.style.color = type === 'error' ? 'red' : type === 'success' ? 'green' : type === 'warning' ? 'orange' : 'black';
+            log.appendChild(logEntry);
+            log.scrollTop = log.scrollHeight;
+            console.log(`[${timestamp}] ${message}`);
+        }
+
+        function updateCallState(state) {
+            callState.textContent = state;
+            addLog(`Call state: ${state}`, 'info');
+        }
+
+        function updateConnectionStatus(isConnected, socketId = '') {
+            if (isConnected) {
+                status.textContent = `Connected (${socketId})`;
+                status.className = 'status connected';
+            } else {
+                status.textContent = 'Disconnected';
+                status.className = 'status disconnected';
+            }
+        }
+
+        // Audio visualization
+        function setupAudioVisualization() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            if (localStream) {
+                const localSource = audioContext.createMediaStreamSource(localStream);
+                localAnalyser = audioContext.createAnalyser();
+                localAnalyser.fftSize = 256;
+                localSource.connect(localAnalyser);
+                visualizeAudio(localAnalyser, 'localAudioVisualizer');
+            }
+
+            if (remoteStream) {
+                const remoteSource = audioContext.createMediaStreamSource(remoteStream);
+                remoteAnalyser = audioContext.createAnalyser();
+                remoteAnalyser.fftSize = 256;
+                remoteSource.connect(remoteAnalyser);
+                visualizeAudio(remoteAnalyser, 'remoteAudioVisualizer');
+            }
+        }
+
+        function visualizeAudio(analyser, canvasId) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+
+            function draw() {
+                requestAnimationFrame(draw);
+                analyser.getByteFrequencyData(dataArray);
+
+                ctx.fillStyle = 'rgb(0, 0, 0)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const barWidth = (canvas.width / bufferLength) * 2.5;
+                let barHeight;
+                let x = 0;
+
+                for (let i = 0; i < bufferLength; i++) {
+                    barHeight = dataArray[i] / 2;
+
+                    ctx.fillStyle = `rgb(${barHeight + 100}, 50, 50)`;
+                    ctx.fillRect(x, canvas.height - barHeight / 2, barWidth, barHeight);
+
+                    x += barWidth + 1;
+                }
+            }
+            draw();
+        }
+
+        // Initialize media stream
+        async function initializeMedia(audioOnly = false) {
+            try {
+                addLog(`🎥 Requesting ${audioOnly ? 'microphone' : 'camera and microphone'} access...`, 'info');
+                
+                const constraints = {
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        sampleRate: 44100
+                    },
+                    video: audioOnly ? false : {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        frameRate: { ideal: 30 }
+                    }
+                };
+
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                localVideo.srcObject = localStream;
+                
+                addLog(`✅ Media access granted (${audioOnly ? 'Audio only' : 'Audio + Video'})`, 'success');
+                addLog(`📹 Video tracks: ${localStream.getVideoTracks().length}`, 'info');
+                addLog(`🎤 Audio tracks: ${localStream.getAudioTracks().length}`, 'info');
+
+                // Log track details
+                localStream.getTracks().forEach((track, index) => {
+                    addLog(`Track ${index}: ${track.kind} - ${track.label} (enabled: ${track.enabled})`, 'info');
+                });
+
+                setupAudioVisualization();
+                return true;
+            } catch (error) {
+                addLog(`❌ Failed to access media: ${error.message}`, 'error');
+                console.error('Media access error:', error);
+                return false;
+            }
+        }
+
+        // Initialize WebRTC Peer Connection
+        function createPeerConnection() {
+            try {
+                addLog('🔗 Creating peer connection...', 'info');
+                peerConnection = new RTCPeerConnection(rtcConfig);
+
+                // Add local stream tracks
+                if (localStream) {
+                    localStream.getTracks().forEach(track => {
+                        peerConnection.addTrack(track, localStream);
+                        addLog(`➕ Added ${track.kind} track to peer connection`, 'info');
+                    });
+                }
+
+                // Handle remote stream
+                peerConnection.ontrack = (event) => {
+                    addLog('🔄 Received remote track', 'success');
+                    const [stream] = event.streams;
+                    remoteStream = stream;
+                    remoteVideo.srcObject = stream;
+                    
+                    event.streams[0].getTracks().forEach((track, index) => {
+                        addLog(`Remote track ${index}: ${track.kind} - ${track.label}`, 'info');
+                    });
+
+                    setupAudioVisualization();
+                };
+
+                // Handle ICE candidates
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate && currentRoom) {
+                        addLog('🧊 Sending ICE candidate', 'info');
+                        socket.emit('webrtc:ice-candidate', {
+                            room: currentRoom,
+                            candidate: event.candidate
+                        });
+                    }
+                };
+
+                // Connection state monitoring
+                peerConnection.onconnectionstatechange = () => {
+                    addLog(`🔗 Connection state: ${peerConnection.connectionState}`, 'info');
+                    if (peerConnection.connectionState === 'connected') {
+                        updateCallState('Connected - In call');
+                    }
+                };
+
+                peerConnection.oniceconnectionstatechange = () => {
+                    addLog(`🧊 ICE connection state: ${peerConnection.iceConnectionState}`, 'info');
+                };
+
+                addLog('✅ Peer connection created successfully', 'success');
+                return true;
+            } catch (error) {
+                addLog(`❌ Failed to create peer connection: ${error.message}`, 'error');
+                console.error('Peer connection error:', error);
+                return false;
+            }
+        }
+
+        // Socket.IO initialization and events
+        function initializeSocket() {
+            socket = io(SOCKET_URL, {
+                transports: ['polling', 'websocket'],
+                autoConnect: false,
+                forceNew: true,
+                reconnection: true,
+                timeout: 10000,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 2000
+            });
+
+            // Connection events
+            socket.on('connect', () => {
+                updateConnectionStatus(true, socket.id);
+                addLog(`✅ Connected to server with ID: ${socket.id}`, 'success');
+            });
+
+            socket.on('disconnect', (reason) => {
+                updateConnectionStatus(false);
+                addLog(`❌ Disconnected from server: ${reason}`, 'error');
+            });
+
+            socket.on('connect_error', (error) => {
+                addLog(`❌ Connection error: ${error.message}`, 'error');
+            });
+
+            // Auth events
+            socket.on('auth:ok', (data) => {
+                addLog(`✅ Authentication successful: ${JSON.stringify(data)}`, 'success');
+                authStatus.textContent = `Authenticated as: ${data.userId}`;
+                authStatus.style.color = 'green';
+            });
+
+            // Call signaling events
+            socket.on('call:ringing', (data) => {
+                addLog(`📞 Incoming ${data.type || 'video'} call from: ${data.fromUserId || data.from}`, 'warning');
+                updateCallState(`Incoming ${data.type || 'video'} call from ${data.fromUserId || data.from}`);
+                remoteUserId = data.fromUserId || data.from;
+                isAudioCall = data.type === 'audio';
+                
+                document.getElementById('acceptCall').disabled = false;
+                document.getElementById('declineCall').disabled = false;
+            });
+
+            socket.on('call:accepted', socket.on('audio:accepted', async (data) => {
+                addLog('✅ Call accepted by remote user', 'success');
+                updateCallState('Call accepted - establishing connection...');
+                
+                if (!peerConnection) {
+                    createPeerConnection();
+                }
+                
+                // Create and send offer
+                try {
+                    const offer = await peerConnection.createOffer();
+                    await peerConnection.setLocalDescription(offer);
+                    
+                    socket.emit('webrtc:offer', {
+                        room: currentRoom,
+                        offer: offer,
+                        audioOnly: isAudioCall
+                    });
+                    
+                    addLog('📤 Sent WebRTC offer', 'info');
+                } catch (error) {
+                    addLog(`❌ Failed to create offer: ${error.message}`, 'error');
+                }
+            }));
+
+            socket.on('call:declined', () => {
+                addLog('❌ Call declined by remote user', 'warning');
+                updateCallState('Call declined');
+                cleanupCall();
+            });
+
+            socket.on('call:ended', () => {
+                addLog('📞 Call ended', 'info');
+                updateCallState('Call ended');
+                cleanupCall();
+            });
+
+            // WebRTC signaling events
+            socket.on('webrtc:offer', async (data) => {
+                addLog('📥 Received WebRTC offer', 'info');
+                
+                if (!peerConnection) {
+                    createPeerConnection();
+                }
+                
+                try {
+                    await peerConnection.setRemoteDescription(data.offer);
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    
+                    socket.emit('webrtc:answer', {
+                        room: currentRoom,
+                        answer: answer
+                    });
+                    
+                    addLog('📤 Sent WebRTC answer', 'info');
+                    updateCallState('Connected - In call');
+                } catch (error) {
+                    addLog(`❌ Failed to handle offer: ${error.message}`, 'error');
+                }
+            });
+
+            socket.on('webrtc:answer', async (data) => {
+                addLog('📥 Received WebRTC answer', 'info');
+                
+                try {
+                    await peerConnection.setRemoteDescription(data.answer);
+                    addLog('✅ WebRTC connection established', 'success');
+                    updateCallState('Connected - In call');
+                } catch (error) {
+                    addLog(`❌ Failed to handle answer: ${error.message}`, 'error');
+                }
+            });
+
+            socket.on('webrtc:ice-candidate', async (data) => {
+                addLog('📥 Received ICE candidate', 'info');
+                
+                if (peerConnection) {
+                    try {
+                        await peerConnection.addIceCandidate(data.candidate);
+                        addLog('✅ ICE candidate added', 'info');
+                    } catch (error) {
+                        addLog(`❌ Failed to add ICE candidate: ${error.message}`, 'error');
+                    }
+                }
+            });
+
+            // WebRTC test response
+            socket.on('webrtc:test:response', (data) => {
+                addLog(`🧪 WebRTC Test Result: ${JSON.stringify(data)}`, 'success');
+            });
+
+            // Audio test response
+            socket.on('audio:test:response', (data) => {
+                addLog(`🎤 Audio Test Result: ${JSON.stringify(data)}`, 'success');
+            });
+
+            // DM events
+            socket.on('dm:ready', (data) => {
+                addLog(`✅ DM room ready: ${data.room}`, 'success');
+                currentRoom = data.room;
+            });
+
+            addLog(`🔗 Socket.IO initialized for: ${SOCKET_URL}`, 'info');
+        }
+
+        // Call management functions
+        async function startCall(audioOnly = false) {
+            const toUserId = document.getElementById('toUserId').value;
+            if (!toUserId) {
+                addLog('❌ Please enter a user ID to call', 'error');
+                return;
+            }
+
+            if (!currentUserId) {
+                addLog('❌ Please register first', 'error');
+                return;
+            }
+
+            isAudioCall = audioOnly;
+            addLog(`📞 Starting ${audioOnly ? 'audio' : 'video'} call to: ${toUserId}`, 'info');
+            remoteUserId = toUserId;
+
+            // Open DM first
+            socket.emit('dm:open', { toUserId });
+            
+            // Initialize media if not done
+            if (!localStream) {
+                const mediaSuccess = await initializeMedia(audioOnly);
+                if (!mediaSuccess) return;
+            }
+
+            // Send call invitation
+            setTimeout(() => {
+                if (currentRoom) {
+                    if (audioOnly) {
+                        socket.emit('audio:invite', { room: currentRoom });
+                    } else {
+                        socket.emit('call:invite', { room: currentRoom });
+                    }
+                    updateCallState(`Calling ${toUserId}...`);
+                    document.getElementById('hangupCall').disabled = false;
+                }
+            }, 1000);
+        }
+
+        function acceptCall() {
+            addLog('✅ Accepting call...', 'info');
+            
+            // Initialize media for the call
+            initializeMedia(isAudioCall).then(() => {
+                if (isAudioCall) {
+                    socket.emit('audio:accept', { room: currentRoom });
+                } else {
+                    socket.emit('call:accept', { room: currentRoom });
+                }
+                
+                document.getElementById('acceptCall').disabled = true;
+                document.getElementById('declineCall').disabled = true;
+                document.getElementById('hangupCall').disabled = false;
+            });
+        }
+
+        function declineCall() {
+            addLog('❌ Declining call...', 'info');
+            if (isAudioCall) {
+                socket.emit('audio:decline', { room: currentRoom });
+            } else {
+                socket.emit('call:decline', { room: currentRoom });
+            }
+            cleanupCall();
+        }
+
+        function hangupCall() {
+            addLog('📞 Hanging up call...', 'info');
+            if (isAudioCall) {
+                socket.emit('audio:hangup', { room: currentRoom });
+            } else {
+                socket.emit('call:hangup', { room: currentRoom });
+            }
+            socket.emit('webrtc:end-call', { room: currentRoom });
+            cleanupCall();
+        }
+
+        function cleanupCall() {
+            updateCallState('Ready to call');
+            
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+                addLog('🔗 Peer connection closed', 'info');
+            }
+            
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            
+            localVideo.srcObject = null;
+            remoteVideo.srcObject = null;
+            
+            document.getElementById('acceptCall').disabled = true;
+            document.getElementById('declineCall').disabled = true;
+            document.getElementById('hangupCall').disabled = true;
+            
+            remoteUserId = null;
+            isAudioCall = false;
+        }
+
+        // Media controls
+        function toggleAudio() {
+            if (localStream) {
+                isAudioEnabled = !isAudioEnabled;
+                localStream.getAudioTracks().forEach(track => {
+                    track.enabled = isAudioEnabled;
+                });
+                
+                const btn = document.getElementById('toggleAudio');
+                btn.textContent = isAudioEnabled ? '🎤 Mute Audio' : '🔇 Unmute Audio';
+                
+                if (currentRoom) {
+                    socket.emit('webrtc:audio-toggle', { room: currentRoom, enabled: isAudioEnabled });
+                }
+                
+                addLog(`🎤 Audio ${isAudioEnabled ? 'enabled' : 'disabled'}`, 'info');
+            }
+        }
+
+        function toggleVideo() {
+            if (localStream) {
+                isVideoEnabled = !isVideoEnabled;
+                localStream.getVideoTracks().forEach(track => {
+                    track.enabled = isVideoEnabled;
+                });
+                
+                const btn = document.getElementById('toggleVideo');
+                btn.textContent = isVideoEnabled ? '📹 Stop Video' : '📹 Start Video';
+                
+                if (currentRoom) {
+                    socket.emit('webrtc:video-toggle', { room: currentRoom, enabled: isVideoEnabled });
+                }
+                
+                addLog(`📹 Video ${isVideoEnabled ? 'enabled' : 'disabled'}`, 'info');
+            }
+        }
+
+        function toggleSpeaker() {
+            isSpeakerEnabled = !isSpeakerEnabled;
+            const btn = document.getElementById('toggleSpeaker');
+            btn.textContent = isSpeakerEnabled ? '🔊 Speaker Off' : '🔇 Speaker On';
+            
+            if (remoteVideo) {
+                remoteVideo.muted = !isSpeakerEnabled;
+            }
+            
+            if (currentRoom) {
+                socket.emit('webrtc:speaker-toggle', { room: currentRoom, enabled: isSpeakerEnabled });
+            }
+            
+            addLog(`🔊 Speaker ${isSpeakerEnabled ? 'enabled' : 'disabled'}`, 'info');
+        }
+
+        async function shareScreen() {
+            try {
+                const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+                localVideo.srcObject = screenStream;
+                
+                // Replace video track in peer connection
+                if (peerConnection) {
+                    const sender = peerConnection.getSenders().find(s => 
+                        s.track && s.track.kind === 'video'
+                    );
+                    if (sender) {
+                        await sender.replaceTrack(screenStream.getVideoTracks()[0]);
+                    }
+                }
+                
+                addLog('🖥️ Screen sharing started', 'success');
+                
+                screenStream.getVideoTracks()[0].onended = () => {
+                    addLog('🖥️ Screen sharing ended', 'info');
+                    localVideo.srcObject = localStream;
+                };
+            } catch (error) {
+                addLog(`❌ Screen sharing failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Test functions
+        function testWebRTC() {
+            if (currentRoom) {
+                socket.emit('webrtc:test', { room: currentRoom });
+                addLog('🧪 Testing WebRTC connection...', 'info');
+            } else {
+                addLog('❌ No active room for WebRTC test', 'error');
+            }
+        }
+
+        function testAudio() {
+            if (currentRoom) {
+                socket.emit('audio:test', { room: currentRoom });
+                addLog('🎤 Testing audio connection...', 'info');
+            } else {
+                addLog('❌ No active room for audio test', 'error');
+            }
+        }
+
+        function getWebRTCStats() {
+            if (peerConnection) {
+                peerConnection.getStats().then(stats => {
+                    addLog('📊 WebRTC Stats:', 'info');
+                    stats.forEach(report => {
+                        if (report.type === 'inbound-rtp' || report.type === 'outbound-rtp') {
+                            addLog(`${report.type}: ${report.mediaType} - bytes: ${report.bytesReceived || report.bytesSent}`, 'info');
+                        }
+                    });
+                });
+            } else {
+                addLog('❌ No peer connection available for stats', 'error');
+            }
+        }
+
+        // Event listeners
+        document.getElementById('connect').onclick = () => {
+            socket.connect();
+            addLog('🔌 Connecting to server...', 'info');
+        };
+
+        document.getElementById('disconnect').onclick = () => {
+            socket.disconnect();
+            cleanupCall();
+        };
+
+        document.getElementById('register').onclick = async () => {
+            const userId = document.getElementById('userId').value;
+            if (!userId) {
+                addLog('❌ Please enter a user ID', 'error');
+                return;
+            }
+            
+            currentUserId = userId;
+            socket.emit('auth:register', { userId });
+            addLog(`📤 Registering user: ${userId}`, 'info');
+        };
+
+        document.getElementById('startAudioCall').onclick = () => startCall(true);
+        document.getElementById('startVideoCall').onclick = () => startCall(false);
+        document.getElementById('acceptCall').onclick = acceptCall;
+        document.getElementById('declineCall').onclick = declineCall;
+        document.getElementById('hangupCall').onclick = hangupCall;
+
+        document.getElementById('toggleAudio').onclick = toggleAudio;
+        document.getElementById('toggleVideo').onclick = toggleVideo;
+        document.getElementById('toggleSpeaker').onclick = toggleSpeaker;
+        document.getElementById('shareScreen').onclick = shareScreen;
+
+        document.getElementById('testWebRTC').onclick = testWebRTC;
+        document.getElementById('testAudio').onclick = testAudio;
+        document.getElementById('getStats').onclick = getWebRTCStats;
+
+        document.getElementById('clearLog').onclick = () => {
+            log.innerHTML = '';
+        };
+
+        // Initialize
+        initializeSocket();
+        addLog('🚀 WebRTC Audio/Video Call Test Application loaded', 'success');
+        addLog('📋 Instructions:', 'info');
+        addLog('1. Click "Connect to Server"', 'info');
+        addLog('2. Enter your User ID and click "Register User"', 'info');
+        addLog('3. Enter target User ID and choose "Audio Call" or "Video Call"', 'info');
+        addLog('4. Use another browser tab/window with different User ID to test', 'info');
+    </script>
+</body>
+</html>
